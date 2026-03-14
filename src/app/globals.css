@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #00050f;
+  --foreground: #e0f2fe;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: 'Aldrich', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}

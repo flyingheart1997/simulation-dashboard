@@ -1,0 +1,38 @@
+{
+    "name": "antaris",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev --port 3001",
+        "build": "next build",
+        "start": "next start",
+        "lint": "next lint"
+    },
+    "dependencies": {
+        "@react-three/drei": "latest",
+        "@react-three/fiber": "latest",
+        "clsx": "latest",
+        "lucide-react": "latest",
+        "next": "latest",
+        "react": "latest",
+        "react-dom": "latest",
+        "preact": "^10.25.4",
+        "satellite.js": "^6.0.2",
+        "tailwind-merge": "latest",
+        "three": "^0.183.2",
+        "zustand": "^5.0.0"
+    },
+    "devDependencies": {
+        "@tailwindcss/postcss": "^4.2.1",
+        "@types/node": "latest",
+        "@types/react": "latest",
+        "@types/react-dom": "latest",
+        "@types/three": "^0.183.1",
+        "autoprefixer": "latest",
+        "eslint": "latest",
+        "eslint-config-next": "latest",
+        "postcss": "latest",
+        "tailwindcss": "latest",
+        "typescript": "latest"
+    }
+}
