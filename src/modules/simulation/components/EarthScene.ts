@@ -10,40 +10,79 @@ export class EarthScene {
 
     private textures: Record<string, THREE.Texture> = {};
 
+    private sunDirection: THREE.Vector3 = new THREE.Vector3(1, 0, 0);
+
     constructor(scene: THREE.Scene) {
         this.earth = new THREE.Group();
+        (this.earth as any).isEarthGroup = true;
+        this.textureLoader.setCrossOrigin('anonymous');
 
         // Preload common textures
         this.textures['night'] = this.textureLoader.load('https://unpkg.com/three-globe/example/img/earth-night.jpg');
         this.textures['blue'] = this.textureLoader.load('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg');
         this.textures['dark'] = this.textureLoader.load('https://unpkg.com/three-globe/example/img/earth-dark.jpg');
+        this.textures['white'] = this.textureLoader.load('https://unpkg.com/three-globe/example/img/earth-topology.png');
+        this.textures['night-white'] = this.textureLoader.load('https://unpkg.com/three-globe/example/img/earth-night.jpg'); // dummy or reuse night for white too? No, let's keep it simple.
 
-        const bumpTexture = this.textureLoader.load('https://unpkg.com/three-globe/example/img/earth-topology.png');
-        const waterTexture = this.textureLoader.load('https://unpkg.com/three-globe/example/img/earth-water.png');
 
         // Earth Geometry
         const geometry = new THREE.SphereGeometry(this.RADIUS, 128, 128);
-        const material = new THREE.MeshPhongMaterial({
-            map: this.textures['night'],
-            bumpMap: bumpTexture,
-            bumpScale: 5,
-            specularMap: waterTexture,
-            specular: new THREE.Color(0x333333),
-            shininess: 15,
-            emissive: new THREE.Color(0x222222),
-            emissiveMap: this.textures['night'],
-            emissiveIntensity: 0.6
+        
+        // Custom Shader Material for Day/Night blending
+        const material = new THREE.ShaderMaterial({
+            uniforms: {
+                dayTexture: { value: this.textures['blue'] },
+                nightTexture: { value: this.textures['night'] },
+                sunDirection: { value: this.sunDirection },
+                showDayNight: { value: 1.0 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                varying vec3 vWorldNormal;
+                void main() {
+                    vUv = uv;
+                    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D dayTexture;
+                uniform sampler2D nightTexture;
+                uniform vec3 sunDirection;
+                uniform float showDayNight;
+                varying vec2 vUv;
+                varying vec3 vWorldNormal;
+
+                void main() {
+                    vec3 sunDir = normalize(sunDirection);
+                    float intensity = dot(normalize(vWorldNormal), sunDir);
+                    
+                    vec4 dayColor = texture2D(dayTexture, vUv);
+                    vec4 nightColor = texture2D(nightTexture, vUv);
+                    
+                    // Background fallback if textures aren't loaded (grey -> deep blue)
+                    if (dayColor.a < 0.1) dayColor = vec4(0.05, 0.1, 0.2, 1.0);
+                    if (nightColor.a < 0.1) nightColor = vec4(0.0, 0.01, 0.02, 1.0);
+
+                    // Smooth transition at the terminator
+                    float mixStep = smoothstep(-0.15, 0.15, intensity);
+                    
+                    if (showDayNight > 0.5) {
+                        // Night side: dark blue mixed with night lights
+                        vec4 nightBase = mix(vec4(0.0, 0.02, 0.05, 1.0), nightColor, 0.8);
+                        gl_FragColor = mix(nightBase, dayColor, mixStep);
+                    } else {
+                        gl_FragColor = dayColor;
+                    }
+                }
+            `
         });
 
         this.sphere = new THREE.Mesh(geometry, material);
         this.earth.add(this.sphere);
 
-        // Day/Night Overlay (Simple version: a dark semi-transparent sphere that we can mask if needed)
-        // For a true Day/Night effect, we'd use a shader. 
-        // For now, let's implement a simple emissive "night" texture that can be toggled.
-
         // ⭐ STAR BACKGROUND
-        const starsTexture = this.textureLoader.load('/textures/night-sky.png');
+        const starsTexture = this.textureLoader.load('https://unpkg.com/three-globe/example/img/night-sky.png');
         scene.background = starsTexture;
 
         // ⭐ DATA LAYERS
@@ -76,37 +115,41 @@ export class EarthScene {
         return this.earth;
     }
 
-    update(_viewVector: THREE.Vector3, visibleLayers: string[] = [], selectedMap: string = 'night', showDayNight: boolean = false): void {
-        // Map texture switching
-        const mat = this.sphere.material as THREE.MeshPhongMaterial;
-        let targetTexture = this.textures[selectedMap] || this.textures['night'];
+    update(_viewVector: THREE.Vector3, visibleLayers: string[] = [], selectedMap: string = 'night', showDayNight: boolean = false, sunPos?: THREE.Vector3): void {
+        const mat = this.sphere.material as THREE.ShaderMaterial;
+        
+        if (sunPos) {
+            mat.uniforms.sunDirection.value.copy(sunPos);
+        }
+        
+        mat.uniforms.showDayNight.value = showDayNight ? 1.0 : 0.0;
 
-        if (mat.map !== targetTexture) {
-            mat.map = targetTexture;
-            mat.emissiveMap = targetTexture;
-            mat.needsUpdate = true;
+        // Map texture switching
+        let dayTexKey = selectedMap;
+        if (selectedMap === 'night') dayTexKey = 'blue';
+        
+        const dayTex = this.textures[dayTexKey] || this.textures['blue'];
+        if (mat.uniforms.dayTexture.value !== dayTex) {
+            mat.uniforms.dayTexture.value = dayTex;
         }
 
-        // Day/Night visualization
-        // If showDayNight is on, we simulate it by adjusting emissive intensity
-        // In a real app, this would use a Sun direction and a custom shader
-        if (showDayNight) {
-            mat.emissiveIntensity = 1.0;
-            mat.shininess = 25;
+        // For white map, disable day/night blending impact by setting nightTexture to same as day
+        if (selectedMap === 'white') {
+            mat.uniforms.nightTexture.value = dayTex;
         } else {
-            mat.emissiveIntensity = 0.4;
-            mat.shininess = 5;
+            mat.uniforms.nightTexture.value = this.textures['night'];
         }
 
         // Earth rotation
-        this.sphere.rotation.y += 0.00005;
+        // Earth rotation - Disabled to maintain coordinate synchronization with lat/lon
+        // this.sphere.rotation.y += 0.00005;
 
         // Data layers visibility and rotation
+        const layers = Array.isArray(visibleLayers) ? visibleLayers : [];
+        
+        // Data layers rotation - Disabled for synchronization
         this.dataLayers.forEach((mesh, id) => {
-            mesh.visible = visibleLayers.includes(id);
-            if (mesh.visible) {
-                mesh.rotation.y += 0.0001;
-            }
+            mesh.visible = layers.includes(id);
         });
     }
 }

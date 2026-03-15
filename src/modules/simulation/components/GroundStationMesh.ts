@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GroundStation } from '../modules/types';
+import { GroundStation, SimulatedSatellite } from '../modules/types';
 import { simulationStore } from '../stores/simulationStore';
+import { latLonToVector3 } from '../utils/coordUtils';
 
 /**
  * Creates a canvas texture for the ground station icon.
@@ -14,90 +15,55 @@ function createGSIconTexture(): THREE.Texture {
     canvas.height = size;
     const ctx = canvas.getContext('2d')!;
 
+    const centerX = size / 2;
+    const centerY = size / 2;
+
     // ── Outer glow halo ──────────────────────────────────────────
-    const glow = ctx.createRadialGradient(128, 128, 10, 128, 128, 120);
-    glow.addColorStop(0, 'rgba(0, 255, 136, 0.25)');
-    glow.addColorStop(0.5, 'rgba(0, 255, 136, 0.08)');
+    const glow = ctx.createRadialGradient(centerX, centerY, 10, centerX, centerY, 120);
+    glow.addColorStop(0, 'rgba(0, 255, 136, 0.2)');
+    glow.addColorStop(0.6, 'rgba(0, 255, 136, 0.05)');
     glow.addColorStop(1, 'rgba(0, 255, 136, 0)');
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, size, size);
 
-    ctx.strokeStyle = '#00ff88';
-    ctx.fillStyle = 'rgba(0, 255, 136, 0.85)';
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    // ── Parabolic dish bowl ──────────────────────────────────────
-    const dishX = 128;   // center
-    const dishY = 90;    // apex of the bowl (bottom)
-    const dishW = 80;    // half-width
-    const dishH = 45;    // depth
-
+    // ── Hexagonal Frame ──────────────────────────────────────────
+    const hexRadius = 70;
     ctx.beginPath();
-    ctx.moveTo(dishX - dishW, dishY - dishH);
-    ctx.quadraticCurveTo(dishX, dishY + 20, dishX + dishW, dishY - dishH);
-    ctx.lineTo(dishX - dishW, dishY - dishH);
+    for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i - Math.PI / 6;
+        const x = centerX + hexRadius * Math.cos(angle);
+        const y = centerY + hexRadius * Math.sin(angle);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    }
     ctx.closePath();
-    ctx.fillStyle = 'rgba(0, 255, 136, 0.22)';
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(dishX - dishW, dishY - dishH);
-    ctx.quadraticCurveTo(dishX, dishY + 20, dishX + dishW, dishY - dishH);
     ctx.strokeStyle = '#00ff88';
-    ctx.lineWidth = 3.5;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(dishX - dishW, dishY - dishH);
-    ctx.lineTo(dishX + dishW, dishY - dishH);
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // ── Feed arm (line from center of dish to focal point above) ─
-    ctx.beginPath();
-    ctx.moveTo(dishX, dishY + 10); // near apex
-    ctx.lineTo(dishX - 18, dishY - dishH - 18); // feed horn at left
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.fillStyle = '#00ff88';
-    ctx.fillRect(dishX - 22, dishY - dishH - 22, 8, 8);
-
-    // ── Vertical support mast ────────────────────────────────────
-    const mastTopY = dishY + 20;
-    const mastBotY = 195;
-    ctx.beginPath();
-    ctx.moveTo(dishX, mastTopY);
-    ctx.lineTo(dishX, mastBotY);
     ctx.lineWidth = 4;
     ctx.stroke();
+    ctx.fillStyle = 'rgba(0, 255, 136, 0.1)';
+    ctx.fill();
 
-    // ── Platform / base legs ────────────────────────────────────
+    // ── Signal Pulse Rings ───────────────────────────────────────
     ctx.beginPath();
-    ctx.moveTo(dishX, mastBotY);
-    ctx.lineTo(dishX - 36, mastBotY + 18);
+    ctx.arc(centerX, centerY, 30, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.6)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 45, -Math.PI * 0.4, -Math.PI * 0.6, true);
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.4)';
     ctx.lineWidth = 3;
     ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(dishX, mastBotY);
-    ctx.lineTo(dishX + 36, mastBotY + 18);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(dishX - 40, mastBotY + 20);
-    ctx.lineTo(dishX + 40, mastBotY + 20);
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
 
-    // ── Bright focal point dot ───────────────────────────────────
-    const dotGrad = ctx.createRadialGradient(dishX, dishY + 10, 0, dishX, dishY + 10, 8);
-    dotGrad.addColorStop(0, '#ffffff');
-    dotGrad.addColorStop(0.4, '#00ff88');
-    dotGrad.addColorStop(1, 'rgba(0,255,136,0)');
-    ctx.fillStyle = dotGrad;
+    // ── Central Glow Core ────────────────────────────────────────
+    const coreGrad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 15);
+    coreGrad.addColorStop(0, '#ffffff');
+    coreGrad.addColorStop(0.4, '#00ff88');
+    coreGrad.addColorStop(1, 'rgba(0,255,136,0)');
+    ctx.fillStyle = coreGrad;
     ctx.beginPath();
-    ctx.arc(dishX, dishY + 10, 8, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, 15, 0, Math.PI * 2);
     ctx.fill();
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -123,32 +89,40 @@ export class GroundStationLayer {
     private raycaster = new THREE.Raycaster();
     private mouse = new THREE.Vector2();
 
-    private boundClick: (e: MouseEvent) => void;
     private boundMouseMove: (e: MouseEvent) => void;
 
     private static readonly RADIUS = 6371;
+
+    private onSelectGs?: (id: string | null) => void;
+    private onHoverGs?: (id: string | null, pos: { x: number, y: number } | null) => void;
 
     constructor(
         scene: THREE.Scene,
         camera: THREE.PerspectiveCamera,
         controls: OrbitControls,
-        renderer: THREE.WebGLRenderer
+        renderer: THREE.WebGLRenderer,
+        onSelect?: (id: string | null) => void,
+        onHover?: (id: string | null, pos: { x: number, y: number } | null) => void
     ) {
         this.scene = scene;
         this.camera = camera;
         this.controls = controls;
+        this.renderer = renderer;
         this.renderer = renderer;
 
         this.geometry = new THREE.BufferGeometry();
         const iconTexture = createGSIconTexture();
         const material = new THREE.PointsMaterial({
             color: 0x00ff88,
-            size: 1400,
-            sizeAttenuation: true,
+            size: 30, // Reduced from 45 as per request
+            sizeAttenuation: false,
             map: iconTexture,
             transparent: true,
             alphaTest: 0.01,
+            depthTest: true,
             depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -1, // Pull slightly towards camera to avoid z-fighting
             blending: THREE.AdditiveBlending,
         });
 
@@ -157,9 +131,7 @@ export class GroundStationLayer {
         this.points.renderOrder = 2;
         scene.add(this.points);
 
-        this.boundClick = this.onClick.bind(this);
         this.boundMouseMove = this.onMouseMove.bind(this);
-        renderer.domElement.addEventListener('click', this.boundClick);
         renderer.domElement.addEventListener('mousemove', this.boundMouseMove);
     }
 
@@ -168,44 +140,48 @@ export class GroundStationLayer {
         const positions = new Float32Array(stations.length * 3);
 
         stations.forEach((gs, i) => {
-            const v = this.latLonToCartesian(gs.lat, gs.lon);
+            const v = latLonToVector3(gs.lat, gs.lon, 35);
             positions[i * 3] = v.x;
             positions[i * 3 + 1] = v.y;
             positions[i * 3 + 2] = v.z;
         });
 
         this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        this.geometry.computeBoundingSphere();
-        const bs = this.geometry.boundingSphere;
-        if (bs) bs.radius = 100000;
+        
+        // Ensure positions are valid before computing bounding sphere
+        let hasNaN = false;
+        for (let i = 0; i < positions.length; i++) {
+            if (isNaN(positions[i])) {
+                hasNaN = true;
+                break;
+            }
+        }
+
+        if (!hasNaN && positions.length > 0) {
+            this.geometry.computeBoundingSphere();
+            const bs = this.geometry.boundingSphere;
+            if (bs) bs.radius = 100000;
+        }
+
         const posAttr = this.geometry.attributes['position'];
         if (posAttr) posAttr.needsUpdate = true;
     }
 
-    tick(): void {
+    tick(selectedGsId: string | null = null, satPositions?: Map<string, THREE.Vector3>): void {
         const state = simulationStore.getState();
-        const selectedId = state.selectedGroundStationId;
+        const selectedId = selectedGsId || state.selectedGroundStationId;
 
-        this.updateCommLines(state);
+        this.updateCommLines(state, satPositions);
 
         if (selectedId) {
             const gs = this.groundStations.find(g => g.id === selectedId);
             if (gs) {
-                const pos = this.latLonToCartesian(gs.lat, gs.lon);
+                const pos = latLonToVector3(gs.lat, gs.lon, 35);
                 this.updateFocusedModel(pos, gs.id, pos.clone().normalize());
-
-                if (this.focusedModel?.userData['isPulseGroup']) {
-                    this.focusedModel.quaternion.copy(this.camera.quaternion);
-                    const p = 0.5 + 0.5 * Math.sin(Date.now() * 0.003);
-                    this.focusedModel.children.forEach((child, i) => {
-                        const mat = (child as THREE.LineLoop).material as THREE.LineBasicMaterial;
-                        if (mat) mat.opacity = i === 0 ? 0.5 + p * 0.5 : 0.2 + p * 0.3;
-                    });
-                }
 
                 this.controls.target.lerp(pos, 0.1);
                 const upDir = pos.clone().normalize();
-                const targetCamPos = pos.clone().add(upDir.multiplyScalar(150));
+                const targetCamPos = pos.clone().add(upDir.multiplyScalar(4000));
                 this.camera.position.lerp(targetCamPos, 0.06);
                 this.isZoomed = true;
             }
@@ -215,30 +191,20 @@ export class GroundStationLayer {
         }
     }
 
-    private onClick(e: MouseEvent): void {
-        const rect = this.renderer.domElement.getBoundingClientRect();
-        this.mouse.set(
-            ((e.clientX - rect.left) / rect.width) * 2 - 1,
-            -((e.clientY - rect.top) / rect.height) * 2 + 1
-        );
-        this.raycaster.setFromCamera(this.mouse, this.camera);
+    public getIntersectedGsId(raycaster: THREE.Raycaster): string | null {
         const camDist = this.camera.position.length();
-        this.raycaster.params.Points = { threshold: Math.max(30, camDist / 100) };
-        const hits = this.raycaster.intersectObject(this.points);
+        raycaster.params.Points = { threshold: Math.max(30, camDist / 100) };
+        const hits = raycaster.intersectObject(this.points);
         if (hits.length > 0) {
             const hit = hits[0];
             const idx = hit?.index ?? -1;
             if (idx >= 0 && idx < this.groundStations.length) {
-                const gs = this.groundStations[idx];
-                if (gs) {
-                    simulationStore.selectGroundStation(gs.id);
-                    simulationStore.selectSatellite(null);
-                }
+                return this.groundStations[idx].id;
             }
-        } else {
-            simulationStore.selectGroundStation(null);
         }
+        return null;
     }
+
 
     private onMouseMove(e: MouseEvent): void {
         const rect = this.renderer.domElement.getBoundingClientRect();
@@ -258,6 +224,7 @@ export class GroundStationLayer {
                 if (gs) {
                     simulationStore.hoverGroundStation(gs.id);
                     simulationStore.setGsTooltipPos({ x: e.clientX, y: e.clientY });
+                    this.onHoverGs?.(gs.id, { x: e.clientX, y: e.clientY });
                     this.renderer.domElement.style.cursor = 'pointer';
                     return;
                 }
@@ -265,6 +232,7 @@ export class GroundStationLayer {
         }
         simulationStore.hoverGroundStation(null);
         simulationStore.setGsTooltipPos(null);
+        this.onHoverGs?.(null, null);
         this.renderer.domElement.style.cursor = '';
     }
 
@@ -280,30 +248,11 @@ export class GroundStationLayer {
 
     private createDishModel(): THREE.Group {
         const group = new THREE.Group();
-        const buildRing = (radius: number, color: number, opacity: number) => {
-            const segments = 48;
-            const pts: THREE.Vector3[] = [];
-            for (let i = 0; i <= segments; i++) {
-                const a = (i / segments) * Math.PI * 2;
-                pts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0));
-            }
-            const geo = new THREE.BufferGeometry().setFromPoints(pts);
-            const mat = new THREE.LineBasicMaterial({
-                color,
-                transparent: true,
-                opacity,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending,
-            });
-            return new THREE.LineLoop(geo, mat);
-        };
-        group.add(buildRing(350, 0x00ff88, 0.9));
-        group.add(buildRing(550, 0x00ffcc, 0.4));
-        group.userData['isPulseGroup'] = true;
+        // Removed selection rings based on user feedback
         return group;
     }
 
-    private updateCommLines(state: any): void {
+    private updateCommLines(state: any, satPositions?: Map<string, THREE.Vector3>): void {
         for (const line of this.commLines) {
             this.scene.remove(line);
             line.geometry.dispose();
@@ -311,24 +260,10 @@ export class GroundStationLayer {
         }
         this.commLines = [];
 
-        const satelliteMap = state.satellites as Map<string, any>;
-        if (!satelliteMap || satelliteMap.size === 0) return;
+        if (!state.showCommLinks) return;
 
-        const satPositions: THREE.Vector3[] = [];
-        satelliteMap.forEach((sat: any) => {
-            if (sat?.position) {
-                const alt = sat.position.alt ?? 550;
-                const phi = (90 - sat.position.lat) * (Math.PI / 180);
-                const theta = (sat.position.lon + 180) * (Math.PI / 180);
-                const r = GroundStationLayer.RADIUS + alt;
-                satPositions.push(new THREE.Vector3(
-                    -r * Math.sin(phi) * Math.cos(theta),
-                    r * Math.cos(phi),
-                    r * Math.sin(phi) * Math.sin(theta)
-                ));
-            }
-        });
-        if (satPositions.length === 0) return;
+        const satelliteMap = state.satellites as Map<string, SimulatedSatellite>;
+        if (!satelliteMap || satelliteMap.size === 0) return;
 
         this.commLinePulse = (this.commLinePulse + 0.025) % (Math.PI * 2);
         const pulse = 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(this.commLinePulse));
@@ -336,40 +271,91 @@ export class GroundStationLayer {
         const selectedGsId = state.selectedGroundStationId as string | null;
 
         for (const gs of this.groundStations) {
-            const gsPos = this.latLonToCartesian(gs.lat, gs.lon);
-            let nearestPos: THREE.Vector3 | null = null;
-            let minDist = 12000;
-            for (const sp of satPositions) {
-                const d = gsPos.distanceTo(sp);
-                if (d < minDist) { minDist = d; nearestPos = sp; }
-            }
-            if (!nearestPos) continue;
+            const gsPos = latLonToVector3(gs.lat, gs.lon, 35);
+            const gsVec = gsPos.clone().normalize().multiplyScalar(GroundStationLayer.RADIUS);
+            const minElev = gs.minElevation || 10;
+
+            let bestSatPos: THREE.Vector3 | null = null;
+            let maxElev = -90;
+
+            satelliteMap.forEach((sat, id) => {
+                const cachedPos = satPositions?.get(id);
+                if (cachedPos || sat?.position) {
+                    const satPos = cachedPos || latLonToVector3(sat.position.lat, sat.position.lon, sat.position.alt);
+
+                    // Connection logic: check elevation
+                    const rangeVec = satPos.clone().sub(gsVec);
+                    const upVec = gsVec.clone().normalize();
+                    const dot = rangeVec.clone().normalize().dot(upVec);
+                    const elev = Math.asin(dot) * 180 / Math.PI;
+
+                    if (elev > minElev) { 
+                        if (elev > maxElev) {
+                            maxElev = elev;
+                            bestSatPos = satPos;
+                        }
+                    }
+                }
+            });
+
+            if (!bestSatPos) continue;
+            const satPos = bestSatPos as THREE.Vector3;
 
             const isSelected = gs.id === selectedGsId;
-            const geo = new THREE.BufferGeometry().setFromPoints([gsPos, nearestPos]);
+            
+            // DYNAMIC CURVATURE: Check if straight line intersects Earth
+            const lineDir = satPos.clone().sub(gsVec);
+            const lineLen = lineDir.length();
+            lineDir.normalize();
+            
+            // Closest point to origin on the line: gsVec + t * lineDir
+            // t = - (gsVec . lineDir)
+            const t = -gsVec.dot(lineDir);
+            let minDistToOrigin = gsVec.length(); 
+            if (t > 0 && t < lineLen) {
+                minDistToOrigin = gsVec.clone().add(lineDir.clone().multiplyScalar(t)).length();
+            }
+
+            const earthRadius = GroundStationLayer.RADIUS;
+            let points: THREE.Vector3[] = [];
+            
+            if (minDistToOrigin > earthRadius + 50) {
+                // CLEAR LINE OF SIGHT: Straight line
+                points = [gsPos, satPos];
+            } else {
+                // OBSTRUCTED: Create Curved Arc (Quadratic Bezier)
+                const height = 1500;
+                const mid = gsPos.clone().lerp(satPos, 0.5).normalize().multiplyScalar(earthRadius + height);
+                const curve = new THREE.QuadraticBezierCurve3(gsPos, mid, satPos);
+                points = curve.getPoints(20);
+            }
+
+            const geo = new THREE.BufferGeometry().setFromPoints(points);
+            
             const mat = new THREE.LineBasicMaterial({
-                color: isSelected ? 0x00ffff : 0x00ff44,
+                color: isSelected ? 0x00ffff : 0x00ff88,
                 transparent: true,
-                opacity: isSelected ? Math.min(1, pulse + 0.3) : pulse * 0.7,
+                opacity: isSelected ? 1.0 : 0.8,
                 depthWrite: false,
                 blending: THREE.AdditiveBlending,
             });
             const line = new THREE.Line(geo, mat);
+            line.renderOrder = 10;
             this.scene.add(line);
             this.commLines.push(line);
         }
     }
 
     private resetZoom(): void {
-        if (this.isZoomed) {
-            this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.05);
-            const currentDist = this.camera.position.length();
-            if (currentDist < this.defaultCameraDistance - 100) {
-                const globalPos = this.camera.position.clone().setLength(this.defaultCameraDistance);
-                this.camera.position.lerp(globalPos, 0.05);
-            } else {
-                this.isZoomed = false;
-            }
+        this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.08);
+        const distToOrigin = this.controls.target.length();
+        const distToDefault = Math.abs(this.camera.position.length() - this.defaultCameraDistance);
+
+        if (distToOrigin > 10 || distToDefault > 100) {
+            const globalPos = this.camera.position.clone().setLength(this.defaultCameraDistance);
+            this.camera.position.lerp(globalPos, 0.08);
+        } else {
+            this.isZoomed = false;
         }
     }
 
@@ -381,19 +367,9 @@ export class GroundStationLayer {
         }
     }
 
-    private latLonToCartesian(lat: number, lon: number): THREE.Vector3 {
-        const phi = (90 - lat) * (Math.PI / 180);
-        const theta = (lon + 180) * (Math.PI / 180);
-        const r = GroundStationLayer.RADIUS + 250;
-        return new THREE.Vector3(
-            -r * Math.sin(phi) * Math.cos(theta),
-            r * Math.cos(phi),
-            r * Math.sin(phi) * Math.sin(theta)
-        );
-    }
+    // Local latLonToCartesian removed in favor of shared latLonToVector3
 
     destroy(): void {
-        this.renderer.domElement.removeEventListener('click', this.boundClick);
         this.renderer.domElement.removeEventListener('mousemove', this.boundMouseMove);
         for (const line of this.commLines) {
             this.scene.remove(line);

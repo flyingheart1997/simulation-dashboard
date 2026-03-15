@@ -5,6 +5,9 @@ import { SatelliteInstancedMesh } from './SatelliteInstancedMesh';
 import { GroundStationLayer } from './GroundStationMesh';
 import type { SimulatedSatellite } from '../modules/types';
 import { simulationStore } from '../stores/simulationStore';
+import { getSunPosition } from '../utils/sunUtils';
+import { getSatelliteColor } from '../utils/satelliteUtils';
+import { latLonToVector3 } from '../utils/coordUtils';
 
 export class SatelliteSimulation {
     private scene: THREE.Scene;
@@ -22,23 +25,17 @@ export class SatelliteSimulation {
     private activeModelSatId: string | null = null;
     private orbitPathLines: Map<string, THREE.Line> = new Map();
     private isZoomed: boolean = false;
-    private lastSelectedSatId: string | null = null; // detect satellite change for camera jump
+    private lastSelectedSatId: string | null = null;
     private defaultCameraDistance = 25000;
     private groundStationLayer: GroundStationLayer | null = null;
-    private boundResize: any;
-    private boundClick: any;
-    private boundMouseMove: any;
+    private sunLight: THREE.DirectionalLight;
+    private boundResize: () => void;
+    private boundClick: (e: MouseEvent) => void;
+    private boundMouseMove: (e: MouseEvent) => void;
+    private lastFollowSatPos: THREE.Vector3 | null = null;
 
-    private latLonToCartesian(lat: number, lon: number, alt: number): THREE.Vector3 {
-        const phi = (90 - lat) * (Math.PI / 180);
-        const theta = (lon + 180) * (Math.PI / 180);
-        const r = 6371 + alt;
-        return new THREE.Vector3(
-            -r * Math.sin(phi) * Math.cos(theta),
-            r * Math.cos(phi),
-            r * Math.sin(phi) * Math.sin(theta)
-        );
-    }
+    private visibilityCones: Map<string, THREE.Mesh> = new Map();
+    private gsCoverageMeshes: Map<string, THREE.Mesh> = new Map();
 
     constructor(container: HTMLElement) {
         this.container = container;
@@ -61,9 +58,9 @@ export class SatelliteSimulation {
         const ambientLight = new THREE.AmbientLight(0x404040, 2);
         this.scene.add(ambientLight);
 
-        const sunLight = new THREE.DirectionalLight(0xffffff, 2);
-        sunLight.position.set(5, 3, 5).normalize();
-        this.scene.add(sunLight);
+        this.sunLight = new THREE.DirectionalLight(0xffffff, 2);
+        this.sunLight.position.set(5, 3, 5).normalize();
+        this.scene.add(this.sunLight);
 
         this.earth = new EarthScene(this.scene);
         this.scene.add(this.earth.getGroup());
@@ -79,20 +76,16 @@ export class SatelliteSimulation {
         this.groundStationLayer = new GroundStationLayer(
             this.scene, this.camera, this.controls, this.renderer
         );
-        const filteredGs = simulationStore.getFilteredGroundStations();
-        this.groundStationLayer.updateStations(filteredGs);
-
-        // We'll let the external loop handle updates to avoid flickering
+        const gs = simulationStore.getState().groundStations;
+        this.groundStationLayer.updateStations(gs);
     }
 
     initSatellites(satellites: SimulatedSatellite[]): void {
         this.satelliteIds = satellites.map(s => s.id);
         if (this.instancedMesh) {
-            this.scene.remove(this.instancedMesh.mesh);
             this.instancedMesh.destroy();
         }
-        this.instancedMesh = new SatelliteInstancedMesh(satellites.length);
-        this.scene.add(this.instancedMesh.mesh);
+        this.instancedMesh = new SatelliteInstancedMesh(this.scene, satellites.length);
     }
 
     updateSatellites(satellites: SimulatedSatellite[]): void {
@@ -132,37 +125,44 @@ export class SatelliteSimulation {
             if (selectedId) {
                 const sat = satellites.find(s => s.id === selectedId);
                 if (sat && sat.position) {
-                    const pos = this.latLonToCartesian(sat.position.lat, sat.position.lon, sat.position.alt);
-                    const satColor = this.getSatelliteColor(sat.id);
+                    const pos = latLonToVector3(sat.position.lat, sat.position.lon, sat.position.alt);
+                    const satColor = getSatelliteColor(sat.category, sat.id);
 
-                    // FIXED: Handle velocity as number vs vector
                     let velocityVector = new THREE.Vector3(1, 0, 0);
                     if (sat.orbitPath && sat.orbitPath.length > 1) {
-                        const p1 = this.latLonToCartesian(sat.position.lat, sat.position.lon, sat.position.alt);
+                        const p1 = latLonToVector3(sat.position.lat, sat.position.lon, sat.position.alt);
                         const nextPos = sat.orbitPath[0];
                         if (nextPos) {
-                            const p2 = this.latLonToCartesian(nextPos.lat, nextPos.lon, nextPos.alt);
+                            const p2 = latLonToVector3(nextPos.lat, nextPos.lon, nextPos.alt);
                             velocityVector = p2.clone().sub(p1).normalize();
                         }
                     }
 
                     this.updateFocusedModel(pos, velocityVector, sat.id, satColor);
-                    this.controls.target.lerp(pos, 0.08);
 
                     if (this.lastSelectedSatId !== selectedId) {
                         this.isZoomed = false;
                         this.lastSelectedSatId = selectedId;
                     }
 
-                    if (!this.isZoomed) {
-                        const upDir = pos.clone().normalize();
-                        const targetPos = pos.clone().add(upDir.multiplyScalar(10000));
-                        this.camera.position.lerp(targetPos, 0.05);
+                    const upDir = pos.clone().normalize();
+                    const desiredCamPos = pos.clone().add(upDir.multiplyScalar(4000));
 
-                        if (this.camera.position.distanceTo(targetPos) < 100) {
+                    if (!this.isZoomed) {
+                        this.controls.target.lerp(pos, 0.1);
+                        this.camera.position.lerp(desiredCamPos, 0.05);
+                        if (this.camera.position.distanceTo(desiredCamPos) < 100) {
                             this.isZoomed = true;
                             this.controls.minDistance = 500;
                         }
+                    } else {
+                        const lastSatPos = this.lastFollowSatPos || pos.clone();
+                        this.lastFollowSatPos = pos.clone();
+                        const v1 = lastSatPos.clone().normalize();
+                        const v2 = pos.clone().normalize();
+                        const quaternion = new THREE.Quaternion().setFromUnitVectors(v1, v2);
+                        this.camera.position.applyQuaternion(quaternion);
+                        this.controls.target.set(0, 0, 0);
                     }
                 }
             } else {
@@ -170,23 +170,31 @@ export class SatelliteSimulation {
                 this.removeFocusedModel();
                 this.resetCameraZoom();
             }
+
+            const currentGs = simulationStore.getState().groundStations;
+            if (this.groundStationLayer && (this as any)._lastGsCount !== currentGs.length) {
+                this.groundStationLayer.updateStations(currentGs);
+                (this as any)._lastGsCount = currentGs.length;
+            }
         }
     }
 
     private resetCameraZoom() {
-        if (this.isZoomed) {
-            this.lastSelectedSatId = null;
-            this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.05);
+        this.lastSelectedSatId = null;
+        this.lastFollowSatPos = null;
 
-            const currentDist = this.camera.position.length();
-            const diff = Math.abs(currentDist - this.defaultCameraDistance);
-            if (diff > 200) {
-                const globalPos = this.camera.position.clone().setLength(this.defaultCameraDistance);
-                this.camera.position.lerp(globalPos, 0.05);
-            } else if (this.controls.target.lengthSq() < 500) {
-                this.isZoomed = false;
-                this.controls.minDistance = 7500;
-            }
+        const targetOrigin = new THREE.Vector3(0, 0, 0);
+        const distToOrigin = this.controls.target.length();
+        const distToDefault = Math.abs(this.camera.position.length() - this.defaultCameraDistance);
+
+        if (distToOrigin > 10 || distToDefault > 100) {
+            this.controls.target.lerp(targetOrigin, 0.08);
+            const globalPos = this.camera.position.clone().setLength(this.defaultCameraDistance);
+            this.camera.position.lerp(globalPos, 0.08);
+        } else {
+            this.isZoomed = false;
+            this.controls.minDistance = 7500;
+            this.controls.target.copy(targetOrigin);
         }
     }
 
@@ -199,20 +207,9 @@ export class SatelliteSimulation {
         }
         this.focusedModel.position.copy(pos);
         const targetPos = pos.clone().add(velocity);
-        this.focusedModel.up.copy(pos.clone().normalize());
+        const upVec = new THREE.Vector3(0, 0, 0).sub(pos).normalize();
+        this.focusedModel.up.copy(upVec);
         this.focusedModel.lookAt(targetPos);
-    }
-
-    private getSatelliteColor(id: string): THREE.Color {
-        let hash = 5381;
-        for (let i = 0; i < id.length; i++) {
-            hash = ((hash << 5) + hash) + id.charCodeAt(i);
-            hash = hash & hash;
-        }
-        const hue = Math.abs(hash % 360);
-        const color = new THREE.Color();
-        color.setHSL(hue / 360, 0.9, 0.55);
-        return color;
     }
 
     private createSatelliteModel(color: THREE.Color): THREE.Group {
@@ -260,14 +257,27 @@ export class SatelliteSimulation {
     }
 
     private updateOrbitPath(sat: SimulatedSatellite) {
-        if (!sat.orbitPath || this.orbitPathLines.has(sat.id)) return;
-        const points = sat.orbitPath.map(p => this.latLonToCartesian(p.lat, p.lon, p.alt));
-        const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        const color = this.getSatelliteColor(sat.id);
-        const material = new THREE.LineBasicMaterial({ color: color.getHex(), transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending });
-        const orbitLine = new THREE.Line(geometry, material);
-        this.orbitPathLines.set(sat.id, orbitLine);
-        this.scene.add(orbitLine);
+        if (!sat.orbitPath) return;
+
+        const points = sat.orbitPath.map(p => latLonToVector3(p.lat, p.lon, p.alt));
+        const line = this.orbitPathLines.get(sat.id);
+
+        if (line) {
+            line.geometry.setFromPoints(points);
+            line.geometry.attributes.position.needsUpdate = true;
+        } else {
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const color = getSatelliteColor(sat.category, sat.id);
+            const material = new THREE.LineBasicMaterial({
+                color: color.getHex(),
+                transparent: true,
+                opacity: 0.7,
+                blending: THREE.AdditiveBlending
+            });
+            const orbitLine = new THREE.Line(geometry, material);
+            this.orbitPathLines.set(sat.id, orbitLine);
+            this.scene.add(orbitLine);
+        }
     }
 
     private removeFocusedModel() {
@@ -277,13 +287,43 @@ export class SatelliteSimulation {
         }
     }
 
+    private updateRaycaster(event: MouseEvent) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+        const camDist = this.camera.position.length();
+        this.raycaster.params.Points = { threshold: Math.max(20, camDist / 120) };
+    }
+
     private onClick(event: MouseEvent) {
-        const id = this.getIntersectedSatelliteId(event);
-        simulationStore.selectSatellite(id);
+        this.updateRaycaster(event);
+        const satId = this.getIntersectedSatelliteId();
+
+        const gsId = this.groundStationLayer?.getIntersectedGsId(this.raycaster);
+        const earthIntersect = this.raycaster.intersectObject(this.earth.getGroup(), true);
+
+        if (satId) {
+            simulationStore.selectSatellite(satId);
+            simulationStore.selectGroundStation(null);
+            this.lastFollowSatPos = null;
+        } else if (gsId) {
+            simulationStore.selectGroundStation(gsId);
+            simulationStore.selectSatellite(null);
+            this.lastFollowSatPos = null;
+        } else if (earthIntersect.length > 0) {
+            // Earth click
+        } else {
+            simulationStore.selectSatellite(null);
+            simulationStore.selectGroundStation(null);
+            this.resetCameraZoom();
+            this.lastFollowSatPos = null;
+        }
     }
 
     private onMouseMove(event: MouseEvent) {
-        const id = this.getIntersectedSatelliteId(event);
+        this.updateRaycaster(event);
+        const id = this.getIntersectedSatelliteId();
         simulationStore.hoverSatellite(id);
 
         if (id) {
@@ -295,18 +335,22 @@ export class SatelliteSimulation {
         }
     }
 
-    private getIntersectedSatelliteId(event: MouseEvent): string | null {
+    private getIntersectedSatelliteId(): string | null {
         if (!this.instancedMesh) return null;
-        const rect = this.renderer.domElement.getBoundingClientRect();
-        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-        this.raycaster.setFromCamera(this.mouse, this.camera);
-        const camDist = this.camera.position.length();
-        this.raycaster.params.Points = { threshold: Math.max(20, camDist / 120) };
-        const intersects = this.raycaster.intersectObject(this.instancedMesh.mesh);
+        const meshes = this.instancedMesh.getMeshes();
+        const intersects = this.raycaster.intersectObjects(meshes);
+
         if (intersects && intersects.length > 0) {
             const first = intersects[0];
-            if (first && first.index !== undefined) return this.satelliteIds[first.index] || null;
+            const mesh = first.object as any;
+            const index = first.index;
+
+            if (index !== undefined && mesh.category) {
+                const state = simulationStore.getState();
+                const satellites = Array.from(state.satellites.values()) as SimulatedSatellite[];
+                const catSats = satellites.filter(s => s.category.toLowerCase() === mesh.category);
+                return catSats[index]?.id || null;
+            }
         }
         return null;
     }
@@ -321,11 +365,9 @@ export class SatelliteSimulation {
     private transitionFactor: number = 0;
     private isTransitioning: boolean = false;
 
-    // Consolidated tick method to be called from external loop
     public tick(): void {
         const state = simulationStore.getState();
 
-        // Handle View Mode Transition
         if (state.viewMode !== this.lastViewMode) {
             this.lastViewMode = state.viewMode;
             this.isTransitioning = true;
@@ -340,12 +382,10 @@ export class SatelliteSimulation {
             }
 
             if (state.viewMode === '2d') {
-                // Animate to top-down view
                 const targetPos = new THREE.Vector3(0, 0, 45000);
                 this.camera.position.lerp(targetPos, 0.1);
                 this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.1);
             } else {
-                // Animate to perspective view
                 const targetPos = new THREE.Vector3(15000, 15000, 30000);
                 this.camera.position.lerp(targetPos, 0.1);
                 this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.1);
@@ -353,9 +393,86 @@ export class SatelliteSimulation {
         }
 
         this.controls.update();
-        this.earth.update(this.camera.position, state.visibleLayers, state.selectedMap, state.showDayNightLayer);
-        this.groundStationLayer?.tick();
+        const sunPos = getSunPosition(state.simulationTime);
+        this.sunLight.position.copy(sunPos).multiplyScalar(100000);
+
+        // Pre-calculate Cartesian positions for all layers
+        const satellites = Array.from(state.satellites.values()) as SimulatedSatellite[];
+        const satPositions = new Map<string, THREE.Vector3>();
+        satellites.forEach(sat => {
+            if (sat.position) {
+                satPositions.set(sat.id, latLonToVector3(sat.position.lat, sat.position.lon, sat.position.alt));
+            }
+        });
+
+        this.earth.update(this.camera.position, state.visibleLayers, state.selectedMap, state.showDayNightLayer, sunPos);
+        this.updateSimulationLayers(state, satPositions);
+        this.groundStationLayer?.tick(null, satPositions);
         this.renderer.render(this.scene, this.camera);
+    }
+
+    private updateSimulationLayers(state: any, satPositions: Map<string, THREE.Vector3>) {
+        const satellites = Array.from(state.satellites.values()) as SimulatedSatellite[];
+        const groundStations = state.groundStations;
+
+        if (state.showVisibilityCones) {
+            satellites.forEach(sat => {
+                const id = sat.id;
+                let cone = this.visibilityCones.get(id);
+                const pos = satPositions.get(id);
+                if (!pos) return;
+
+                if (!cone) {
+                    const geometry = new THREE.ConeGeometry(1, 1, 32, 1, true);
+                    const material = new THREE.MeshBasicMaterial({
+                        color: getSatelliteColor(sat.category, id),
+                        transparent: true,
+                        opacity: 0.15,
+                        side: THREE.DoubleSide,
+                        depthWrite: false
+                    });
+                    cone = new THREE.Mesh(geometry, material);
+                    this.visibilityCones.set(id, cone);
+                    this.scene.add(cone);
+                }
+                cone.visible = true;
+                const height = pos.length() - 6371;
+                const dir = pos.clone().normalize();
+                const centerPos = dir.clone().multiplyScalar(6371 + height / 2);
+                cone.position.copy(centerPos);
+                const halfAngle = 45 * Math.PI / 180;
+                const baseRadius = height * Math.tan(halfAngle);
+                cone.scale.set(baseRadius, height, baseRadius);
+                cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+            });
+        } else {
+            this.visibilityCones.forEach(c => c.visible = false);
+        }
+
+        if (state.showGSNCoverage) {
+            groundStations.forEach((gs: any) => {
+                let disc = this.gsCoverageMeshes.get(gs.id);
+                if (!disc) {
+                    const geometry = new THREE.CircleGeometry(1000, 64);
+                    const material = new THREE.MeshBasicMaterial({
+                        color: 0x00ff00,
+                        transparent: true,
+                        opacity: 0.2,
+                        side: THREE.DoubleSide,
+                        depthWrite: false
+                    });
+                    disc = new THREE.Mesh(geometry, material);
+                    this.gsCoverageMeshes.set(gs.id, disc);
+                    this.scene.add(disc);
+                }
+                disc.visible = true;
+                const gsPos = latLonToVector3(gs.lat, gs.lon, 10);
+                disc.position.copy(gsPos);
+                disc.lookAt(gsPos.clone().multiplyScalar(1.1));
+            });
+        } else {
+            this.gsCoverageMeshes.forEach(m => m.visible = false);
+        }
     }
 
     destroy(): void {

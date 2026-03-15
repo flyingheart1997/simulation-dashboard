@@ -350,14 +350,16 @@
 .right-panel::after { bottom: -1px; left: -1px; border-bottom-width: 2px; border-left-width: 2px; }
 
 /* Tooltip */
-.sat-intel-tooltip-modern {
+.intel-tooltip-modern {
   position: absolute; 
-  padding: 10px 14px; 
-  pointer-events: none; z-index: 1000;
-  box-shadow: 0 0 10px rgba(0, 255, 255, 0.1);
-  backdrop-filter: blur(4px);
-  background-color: rgba(0, 10, 20, 0.8);
-  border: none;
+  padding: 12px 16px; 
+  pointer-events: none; 
+  z-index: 9999;
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.15);
+  backdrop-filter: blur(8px);
+  background-color: rgba(0, 10, 25, 0.85);
+  border: 1px solid rgba(0, 255, 255, 0.1);
+  min-width: 200px;
   
   /* Draw 4 corner borders using gradients */
   background-image: 
@@ -371,23 +373,69 @@
     linear-gradient(var(--sim-accent-cyan), var(--sim-accent-cyan));
   background-repeat: no-repeat;
   background-size: 
-    10px 2px, 2px 10px, /* Top Left */
-    10px 2px, 2px 10px, /* Top Right */
-    10px 2px, 2px 10px, /* Bottom Left */
-    10px 2px, 2px 10px; /* Bottom Right */
+    12px 1px, 1px 12px, /* Top Left */
+    12px 1px, 1px 12px, /* Top Right */
+    12px 1px, 1px 12px, /* Bottom Left */
+    12px 1px, 1px 12px; /* Bottom Right */
   background-position: 
     top left, top left,
     top right, top right,
     bottom left, bottom left,
     bottom right, bottom right;
 }
-.tt-title {
-  font-family: var(--font-sim-header); color: #fff; font-size: 12px;
-  letter-spacing: 1px; margin-bottom: 4px;
+
+.tt-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
-.tt-sub {
-  color: var(--sim-text-dim); font-size: 9px; letter-spacing: 1px;
+
+.tt-icon {
+  font-size: 18px;
+  filter: drop-shadow(0 0 5px var(--sim-accent-cyan));
 }
+
+.tt-name {
+  font-family: var(--font-sim-header);
+  color: #fff;
+  font-size: 13px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.tt-category {
+  color: var(--sim-accent-cyan);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  font-weight: bold;
+}
+
+.tt-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tt-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-sim-mono);
+  font-size: 10px;
+}
+
+.tt-row span:first-child {
+  color: var(--sim-text-dim);
+  letter-spacing: 0.5px;
+}
+
+.tt-row span:last-child {
+  color: var(--sim-text-primary);
+  font-weight: 500;
+}
+
 
 /* Intel Panel */
 /* The intel panel already resides INSIDE the side-panel which now has the background box. 
@@ -1678,9 +1726,20 @@ input:checked + .sim-slider:before {
   position: relative;
 }
 
-.map-preview.night { background-image: url('https://unpkg.com/three-globe/example/img/earth-night.jpg'); }
-.map-preview.dark { background-color: #050505; border-color: rgba(255,255,255,0.1); }
-.map-preview.white { background-color: #ffffff; border-color: #cccccc; }
+.map-preview.night { background-image: url('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg'); background-size: cover; }
+.map-preview.dark { background-image: url('https://unpkg.com/three-globe/example/img/earth-dark.jpg'); background-size: cover; border-color: rgba(0, 255, 255, 0.2); }
+.map-preview.white { background-image: url('https://unpkg.com/three-globe/example/img/earth-topology.png'); background-size: cover; background-color: #f0f7ff; border-color: #a0c4ff; }
+
+.map-preview-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(to bottom, rgba(0,255,255,0.05), transparent);
+  pointer-events: none;
+}
+
+.map-preview-icon {
+  display: none;
+}
 
 .sim-map-option span {
   font-size: 10px;

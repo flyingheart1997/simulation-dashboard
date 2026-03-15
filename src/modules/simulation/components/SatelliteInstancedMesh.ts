@@ -1,25 +1,33 @@
 import * as THREE from 'three';
 import { SimulatedSatellite } from '../modules/types';
+import { getSatelliteColor } from '../utils/satelliteUtils';
 
 export class SatelliteInstancedMesh {
-    public mesh: THREE.Points;
-    private positions: Float32Array;
-    private colors: Float32Array;
-    private geometry: THREE.BufferGeometry;
+    private meshes: Map<string, THREE.Points> = new Map();
+    private geometries: Map<string, THREE.BufferGeometry> = new Map();
+    private positionBuffers: Map<string, Float32Array> = new Map();
+    private colorBuffers: Map<string, Float32Array> = new Map();
+    private maxCount: number;
+    private scene: THREE.Scene;
 
-    constructor(initialCount: number = 0) {
-        // Allocate a massive buffer up front to handle all Celestrak sats (~8000-10000)
-        // If initialCount is passed, we just use the max so we never overflow the TypedArray.
-        const maxBufferCount = Math.max(initialCount, 15000);
+    constructor(scene: THREE.Scene, initialCount: number = 0) {
+        this.scene = scene;
+        this.maxCount = Math.max(initialCount, 15000);
+        
+        ['starlink', 'gps', 'weather', 'communication', 'operational', 'default'].forEach(cat => {
+            this.initCategoryMesh(cat);
+        });
+    }
 
-        this.geometry = new THREE.BufferGeometry();
-        this.positions = new Float32Array(maxBufferCount * 3);
-        this.colors = new Float32Array(maxBufferCount * 3);
+    private initCategoryMesh(category: string) {
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(this.maxCount * 3);
+        const colors = new Float32Array(this.maxCount * 3);
 
-        this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-        this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-        const texture = this.createIconTexture();
+        const texture = this.createIconTexture(category);
 
         const material = new THREE.PointsMaterial({
             size: 20,
@@ -29,19 +37,22 @@ export class SatelliteInstancedMesh {
             alphaTest: 0.05,
             sizeAttenuation: false,
             depthWrite: false,
-            blending: THREE.AdditiveBlending // gives a nice screen-glow
+            blending: THREE.AdditiveBlending
         });
 
-        this.mesh = new THREE.Points(this.geometry, material);
-        // CRITICAL FOR RAYCASTING: Without a bounding sphere, Raycaster instantly rejects collisions!
-        this.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 100000);
-        this.mesh.frustumCulled = false; // Always render
-
-        // Initially draw 0 until updated
-        this.geometry.setDrawRange(0, initialCount);
+        const mesh = new THREE.Points(geometry, material);
+        (mesh as any).category = category;
+        mesh.frustumCulled = false;
+        mesh.renderOrder = 5;
+        
+        this.geometries.set(category, geometry);
+        this.positionBuffers.set(category, positions);
+        this.colorBuffers.set(category, colors);
+        this.meshes.set(category, mesh);
+        this.scene.add(mesh);
     }
 
-    private createIconTexture(): THREE.CanvasTexture {
+    private createIconTexture(category: string): THREE.CanvasTexture {
         const canvas = document.createElement('canvas');
         canvas.width = 64;
         canvas.height = 64;
@@ -75,10 +86,29 @@ export class SatelliteInstancedMesh {
         ctx.translate(cx, cy);
         ctx.rotate(-Math.PI / 6); // slight upward tilt
         ctx.beginPath();
-        ctx.moveTo(-32, 0);
-        ctx.lineTo(32, 0);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.lineWidth = 1.5;
+        
+        // Vary shape based on category
+        if (category === 'starlink') {
+            // Simple dash
+            ctx.moveTo(-28, 0); ctx.lineTo(28, 0);
+        } else if (category === 'gps') {
+            // Double cross
+            ctx.moveTo(-28, -6); ctx.lineTo(28, -6);
+            ctx.moveTo(-28, 6); ctx.lineTo(28, 6);
+        } else if (category === 'weather') {
+            // Triangle marker
+            ctx.moveTo(0, -28); ctx.lineTo(24, 14); ctx.lineTo(-24, 14); ctx.closePath();
+        } else if (category === 'communication') {
+            // Box marker
+            ctx.rect(-20, -20, 40, 40);
+        } else {
+            // Default cross
+            ctx.moveTo(-24, -24); ctx.lineTo(24, 24);
+            ctx.moveTo(24, -24); ctx.lineTo(-24, 24);
+        }
+        
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 2;
         ctx.stroke();
         ctx.restore();
 
@@ -87,52 +117,53 @@ export class SatelliteInstancedMesh {
     }
 
     updatePositions(satellites: SimulatedSatellite[]) {
-        const posAttr = this.geometry.getAttribute('position') as THREE.BufferAttribute;
-        const colAttr = this.geometry.getAttribute('color') as THREE.BufferAttribute;
+        const categoryGroups = new Map<string, SimulatedSatellite[]>();
+        satellites.forEach(s => {
+            const cat = (s.category || 'default').toLowerCase();
+            const list = categoryGroups.get(cat) || [];
+            list.push(s);
+            categoryGroups.set(cat, list);
+        });
 
-        for (let i = 0; i < satellites.length; i++) {
-            const sat = satellites[i];
-            if (!sat || !sat.position) continue;
+        this.geometries.forEach((geo, cat) => {
+            const sats = categoryGroups.get(cat) || [];
+            const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
+            const colAttr = geo.getAttribute('color') as THREE.BufferAttribute;
 
-            const phi = (90 - sat.position.lat) * (Math.PI / 180);
-            const theta = (sat.position.lon + 180) * (Math.PI / 180);
-            const r = 6371 + sat.position.alt;
+            for (let i = 0; i < sats.length; i++) {
+                const sat = sats[i];
+                const phi = (90 - sat.position.lat) * (Math.PI / 180);
+                const theta = (sat.position.lon + 180) * (Math.PI / 180);
+                const r = 6371 + sat.position.alt;
 
-            posAttr.setXYZ(
-                i,
-                -r * Math.sin(phi) * Math.cos(theta),
-                r * Math.cos(phi),
-                r * Math.sin(phi) * Math.sin(theta)
-            );
+                posAttr.setXYZ(i, 
+                    -r * Math.sin(phi) * Math.cos(theta),
+                    r * Math.cos(phi),
+                    r * Math.sin(phi) * Math.sin(theta)
+                );
 
-            const color = new THREE.Color(this.getCategoryColor(sat.category, sat.id));
-            if (sat.isSelected) color.setHex(0xffffff);
-            else if (sat.isHovered) color.addScalar(0.2); // brighten on hover
+                const color = getSatelliteColor(sat.category, sat.id);
+                if (sat.isSelected) color.setHex(0xffffff);
+                else if (sat.isHovered) color.addScalar(0.2);
 
-            colAttr.setXYZ(i, color.r, color.g, color.b);
-        }
+                colAttr.setXYZ(i, color.r, color.g, color.b);
+            }
 
-        posAttr.needsUpdate = true;
-        colAttr.needsUpdate = true;
-        this.geometry.setDrawRange(0, satellites.length);
+            posAttr.needsUpdate = true;
+            colAttr.needsUpdate = true;
+            geo.setDrawRange(0, sats.length);
+        });
     }
 
-    private getCategoryColor(category: string, id: string): number {
-        void category; // keep for API compat; color now comes from ID hash
-        // Same djb2 hash as SatelliteSimulation.getSatelliteColor()
-        let hash = 5381;
-        for (let i = 0; i < id.length; i++) {
-            hash = ((hash << 5) + hash) + id.charCodeAt(i);
-            hash = hash & hash;
-        }
-        const hue = Math.abs(hash % 360);
-        const color = new THREE.Color();
-        color.setHSL(hue / 360, 0.9, 0.55);
-        return color.getHex();
+    public getMeshes(): THREE.Points[] {
+        return Array.from(this.meshes.values());
     }
 
     destroy() {
-        this.geometry.dispose();
-        (this.mesh.material as THREE.Material).dispose();
+        this.geometries.forEach(g => g.dispose());
+        this.meshes.forEach(m => {
+            (m.material as THREE.Material).dispose();
+            this.scene.remove(m);
+        });
     }
 }
