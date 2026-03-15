@@ -1,18 +1,27 @@
 import { OriginalSimulation } from "@/modules/simulation/components/OriginalSimulation";
 import { ManualGroundStation } from "@/modules/simulation/modules/types";
 
-const MOCK_SATELLITES = Array.from({ length: 10 }).map((_, i) => ({
-    id: `SAT-${i + 1}`,
-    name: `ANTARIS-S${i + 1}`,
-    altitude: 550 + (i * 20),
-    inclination: 53 + (i * 2),
-    eccentricity: 0.001,
-    RAAN: i * 36,
-    AP: 0,
-    TA: i * 36,
-    startTime: Date.now(),
-    endTime: Date.now() + 130 * 60 * 1000
-}));
+const MOCK_SATELLITES = Array.from({ length: 100 }).map((_, i) => {
+    const planeIdx = Math.floor(i / 10);
+    const satIdxInPlane = i % 10;
+    
+    return {
+        id: `SAT-${i + 1}`,
+        name: `ANTARIS-S${i + 1}`,
+        // Distribute across altitudes (LEO range)
+        altitude: 400 + (planeIdx * 150), 
+        // Distribute inclinations (0 to 180 degrees)
+        inclination: (planeIdx * 180 / 10), 
+        eccentricity: 0.001,
+        // Evenly space Right Ascension of the Ascending Node (RAAN)
+        RAAN: planeIdx * 36, 
+        AP: 0,
+        // Evenly space satellites within each plane
+        TA: satIdxInPlane * 36, 
+        startTime: Date.now(),
+        endTime: Date.now() + 130 * 60 * 1000
+    };
+});
 
 const MOCK_GROUND_STATIONS: ManualGroundStation[] = [
     { id: 'GS-M1', name: 'Mondal Base Alpha', latitude: 22.57, longitude: 88.36, country: 'India', countryCode: 'IND', agency: 'MONDAL-AERO', type: 'research', status: 'active' },
