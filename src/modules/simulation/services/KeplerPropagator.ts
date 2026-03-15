@@ -1,34 +1,38 @@
-import * as satellite from 'satellite.js';
+import { KeplerPhysicsPropagator as PhysicsPropagator } from './physics/KeplerPhysics';
 import { SatellitePosition } from '../modules/types';
 
-export class OrbitPropagator {
-    private satrec: satellite.SatRec;
+export class KeplerPropagator {
+    private propagator: PhysicsPropagator;
     private pathPoints: { time: number; pos: SatellitePosition }[] = [];
     private lastPathUpdate: number = 0;
     private lastCurrentTime: number = 0;
 
-    constructor(line1: string, line2: string) {
-        this.satrec = satellite.twoline2satrec(line1, line2);
+    constructor(params: {
+        name: string;
+        altitude: number;
+        inclination: number;
+        eccentricity: number;
+        RAAN: number;
+        AP: number;
+        TA: number;
+        startTime: number;
+    }) {
+        this.propagator = new PhysicsPropagator(params);
     }
 
     propagate(date: Date = new Date()): SatellitePosition | null {
-        const positionAndVelocity = satellite.propagate(this.satrec, date);
-        if (!positionAndVelocity || !positionAndVelocity.position || !positionAndVelocity.velocity) return null;
-
-        const positionEci = positionAndVelocity.position as satellite.EciVec3<number>;
-        const gmst = satellite.gstime(date);
-        const positionGd = satellite.eciToGeodetic(positionEci, gmst);
-
-        return {
-            lat: satellite.degreesLat(positionGd.latitude),
-            lon: satellite.degreesLong(positionGd.longitude),
-            alt: positionGd.height,
-            velocity: Math.sqrt(
-                Math.pow((positionAndVelocity.velocity as any).x, 2) +
-                Math.pow((positionAndVelocity.velocity as any).y, 2) +
-                Math.pow((positionAndVelocity.velocity as any).z, 2)
-            )
-        };
+        try {
+            const lla = this.propagator.propagate(date.getTime());
+            const r = 6371 + lla.alt;
+            return {
+                lat: lla.lat,
+                lon: lla.lon,
+                alt: lla.alt,
+                velocity: Math.sqrt(398600.4418 / r)
+            };
+        } catch (e) {
+            return null;
+        }
     }
 
     /**

@@ -39,22 +39,12 @@ export class SimulationDashboard extends Component<any, { dragSpeed: number | nu
     render() {
         const state = simulationStore.getState();
         const selectedSat = state.selectedSatelliteId ? state.satellites.get(state.selectedSatelliteId) : null;
-        const selectedGs = state.selectedGroundStationId ? (state as any).groundStations?.find((g: any) => g.id === state.selectedGroundStationId) : null;
+        const selectedGs = state.selectedGroundStationId ? state.groundStations?.find(g => g.id === state.selectedGroundStationId) : null;
 
         if (state.isLoading) {
             const progress = state.loadingProgress || 0;
-            const isCountryChange = (state as any).loadingContext === 'country-change';
-            const countryLabels: Record<string, string> = {
-                'GLOBAL': 'GLOBAL', 'US': 'UNITED STATES', 'PRC': 'CHINA',
-                'CIS': 'RUSSIA', 'IND': 'INDIA', 'ESA': 'EUROPE', 'JPN': 'JAPAN'
-            };
-            const countryLabel = countryLabels[(state as any).selectedCountry] || (state as any).selectedCountry;
-            const loadingTitle = isCountryChange
-                ? `Switching to ${countryLabel}`
-                : 'Initializing Orbital Tracking';
-            const loadingSub = isCountryChange
-                ? `${progress}% Target data acquisition...`
-                : `${progress}% Synchronizing telemetry streams...`;
+            const loadingTitle = 'Initializing Orbital Tracking';
+            const loadingSub = `${progress}% Synchronizing telemetry streams...`;
 
             return h('div', { class: 'loading-overlay' },
                 h('div', { class: 'loader-content' },
@@ -85,7 +75,7 @@ export class SimulationDashboard extends Component<any, { dragSpeed: number | nu
                         )
                     ),
                     h('div', { class: 'loader-status' },
-                        h('span', { class: 'loader-message' }, (loadingSub as any).split('%')[1]?.trim() || loadingSub),
+                        h('span', { class: 'loader-message' }, loadingSub.includes('%') ? loadingSub.split('%')[1]?.trim() : loadingSub),
                         h('span', { class: 'loader-percentage' }, `${progress}%`)
                     )
                 )
@@ -131,27 +121,7 @@ export class SimulationDashboard extends Component<any, { dragSpeed: number | nu
                         h('p', null, `ORBITAL SIMULATION DASHBOARD`)
                     )
                 ),
-                h('div', { class: 'sim-top-mid', style: { display: 'flex', justifyContent: 'center', flex: 1 } },
-                    h('div', { class: 'sim-global-stats' },
-                        h('div', { class: 'sim-stat-item' }, h('span', { class: 'sim-stat-val', style: { color: 'var(--sim-accent-cyan)' } }, trackedCount.toLocaleString()), h('span', { class: 'sim-stat-lbl' }, 'TRACKED')),
-                        h('div', { class: 'sim-stat-item' }, h('span', { class: 'sim-stat-val', style: { color: 'var(--sim-accent-orange)' } }, debrisCount.toLocaleString()), h('span', { class: 'sim-stat-lbl' }, 'DEBRIS')),
-                        h('div', { class: 'sim-stat-item' }, h('span', { class: 'sim-stat-val', style: { color: 'var(--sim-accent-green)' } }, activeCount.toLocaleString()), h('span', { class: 'sim-stat-lbl' }, 'ACTIVE'))
-                    )
-                ),
                 h('div', { class: 'sim-controls-right', style: { flex: 1, display: 'flex', justifyContent: 'flex-end' } },
-                    h('div', { class: 'sim-modern-btn-wrap' },
-                        h('div', { class: 'sim-modern-content', style: { padding: '0px' } },
-                            h('select', {
-                                class: 'sim-modern-select',
-                                value: state.selectedCountry,
-                                onChange: (e: any) => simulationStore.setCountry(e.target.value)
-                            },
-                                Object.entries(TleLoader.COUNTRY_LABELS).map(([code, label]) =>
-                                    h('option', { value: code }, label + (code === 'GLOBAL' ? ' (500)' : ''))
-                                )
-                            )
-                        )
-                    ),
                     h('div', {
                         class: 'sim-modern-btn-wrap settings-btn',
                         onClick: this.toggleSettings
@@ -165,13 +135,7 @@ export class SimulationDashboard extends Component<any, { dragSpeed: number | nu
 
             // MAIN AREA
             h('div', { class: 'sim-main-area' },
-                // Left panel removed as requested
-                h('div', { style: { flex: 1, pointerEvents: 'none' } }),
-
-                // Right panel
-                h('div', { class: `sim-side-panel right-panel ${this.state.collapsedPanels.right ? 'collapsed' : ''}` },
-                    (selectedSat || selectedGs) ? this.renderIntelPanel(selectedSat, selectedGs, state) : this.renderGlobalRightPanel(state)
-                )
+                h('div', { style: { flex: 1, pointerEvents: 'none' } })
             ),
 
             // SETTINGS MODAL
@@ -265,12 +229,7 @@ export class SimulationDashboard extends Component<any, { dragSpeed: number | nu
                             })
                         )
                     );
-                })(),
-                h('div', { class: 'sim-coordinates', style: { pointerEvents: 'auto' } },
-                    h('span', null, h('span', { class: 'sim-coord-lbl' }, 'LAT:'), h('span', { class: 'sim-coord-val' }, centerLat.toFixed(3) + '°')),
-                    h('span', null, h('span', { class: 'sim-coord-lbl' }, 'LON:'), h('span', { class: 'sim-coord-val' }, centerLon.toFixed(3) + '°')),
-                    h('span', null, h('span', { class: 'sim-coord-lbl' }, 'ALT:'), h('span', { class: 'sim-coord-val' }, centerAlt.toFixed(0) + ' km'))
-                )
+                })()
             ),
             this.renderTooltips(state)
         );
@@ -326,6 +285,16 @@ export class SimulationDashboard extends Component<any, { dragSpeed: number | nu
                             this.renderDataToggle('❄️', 'Ice Coverage', state.visibleLayers?.includes('ice') ?? false, 'ice'),
                             this.renderDataToggle('🧲', 'Gravity Field', state.visibleLayers?.includes('gravity') ?? false, 'gravity')
                         )
+                    ),
+
+                    // Simulation Layers
+                    h('div', { class: 'sim-setting-group' },
+                        h('h3', null, 'SIMULATION LAYERS'),
+                        h('div', { class: 'sim-toggle-list' },
+                            this.renderToggleRow('👁️', 'Satellite Visibility Cone', !!state.showVisibilityCones, () => simulationStore.toggleVisibilityCones()),
+                            this.renderToggleRow('📡', 'Ground Station Coverage', !!state.showGSNCoverage, () => simulationStore.toggleGSNCoverage()),
+                            this.renderToggleRow('🔗', 'Communication Links', !!state.showCommLinks, () => simulationStore.toggleCommLinks())
+                        )
                     )
                 )
             )
@@ -337,7 +306,9 @@ export class SimulationDashboard extends Component<any, { dragSpeed: number | nu
             class: `sim-map-option ${active ? 'active' : ''}`,
             onClick: () => simulationStore.setMap(id as any)
         },
-            h('div', { class: `map-preview ${id}` }),
+            h('div', { class: `map-preview ${id}`, style: { overflow: 'hidden' } },
+                h('div', { class: 'map-preview-overlay' })
+            ),
             h('span', null, label)
         );
     }
@@ -356,69 +327,54 @@ export class SimulationDashboard extends Component<any, { dragSpeed: number | nu
         );
     }
 
-    private renderGlobalRightPanel(state: any) {
-        const timeOffset = state.simulationTime.getTime() / 1000;
-        const surfaceTemp = 14.8 + Math.sin(timeOffset / 100) * 0.3;
-        const co2Conc = 421.4 + Math.cos(timeOffset / 120) * 1.5;
-        const oceanTemp = 0.93 + Math.sin(timeOffset / 200) * 0.05;
-        const seaIce = Math.max(0, 4.92 + Math.cos(timeOffset / 300) * 0.08);
-        const gravity = -20 + Math.sin(timeOffset / 50) * 2;
-        const ozone = Math.round(287 + Math.cos(timeOffset / 80) * 5);
-
-        return h('div', { class: 'sim-right-global-container', style: { display: 'flex', flexDirection: 'column', height: '100%' } },
-            h('div', { class: 'sim-panel-header', onClick: () => this.togglePanel('right'), style: { cursor: 'pointer' } },
-                h('div', { class: 'sim-panel-title', style: { flex: 1 } }, 'TELEMETRY'),
-                h('div', { class: 'sim-collapse-arrow', style: { transform: this.state.collapsedPanels.right ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.3s' } }, '▼')
-            ),
-            !this.state.collapsedPanels.right && h('div', { class: 'sim-telemetry-list', style: { display: 'flex', flexDirection: 'column', gap: '15px' } },
-                this.renderTelemetryBar('SURFACE TEMP', `+ ${surfaceTemp.toFixed(2)}°C`, 65, 'orange'),
-                this.renderTelemetryBar('CO2 CONC.', `${co2Conc.toFixed(1)} PPM`, 85, 'red'),
-                this.renderTelemetryBar('OCEAN TEMP', `+ ${oceanTemp.toFixed(2)}°C`, 45, 'cyan'),
-                this.renderTelemetryBar('SEA ICE', `${seaIce.toFixed(2)}M KM²`, 30, 'cyan'),
-                this.renderTelemetryBar('GRAVITY', `${gravity.toFixed(0)} MGAL`, 50, 'cyan'),
-                this.renderTelemetryBar('OZONE', `${ozone} DU`, 75, 'green')
-            )
-        );
-    }
-
-    private renderIntelPanel(sat: any, gs: any, state: any) {
-        if (sat) {
-            return h('div', { class: 'sim-intel-panel' },
-                h('div', { class: 'intel-panel-header' }, h('h2', null, sat.name), h('div', { class: 'intel-sub-title' }, `${sat.category.toUpperCase()} · TRACKED OBJECT`)),
-                h('div', { class: 'stat-group' },
-                    this.renderStatRow('NORAD ID', sat.noradId || 'UNKNOWN'),
-                    this.renderStatRow('LATITUDE', `${sat.position.lat.toFixed(3)}°`),
-                    this.renderStatRow('LONGITUDE', `${sat.position.lon.toFixed(3)}°`),
-                    this.renderStatRow('ALTITUDE', `${sat.position.alt.toFixed(0)} km`)
-                )
-            );
-        } else if (gs) {
-            return h('div', { class: 'sim-intel-panel' },
-                h('div', { class: 'intel-panel-header' }, h('h2', null, gs.name), h('div', { class: 'intel-sub-title' }, `${gs.agency} · ${gs.country} `)),
-                h('div', { class: 'stat-group' },
-                    this.renderStatRow('COORD', `${gs.lat?.toFixed(2)}°, ${gs.lon?.toFixed(2)}°`),
-                    this.renderStatRow('ELEVATION', `${gs.elevation ?? '—'} m`)
-                )
-            );
-        }
-        return null;
-    }
-
-    private renderStatRow(lbl: string, val: string) {
-        return h('div', { class: 'stat-row' }, h('span', { class: 'stat-lbl' }, lbl), h('span', { class: 'stat-val' }, val));
-    }
-
-    private renderTelemetryBar(label: string, valueStr: string, percentage: number, colorClass: string) {
-        return h('div', { class: 'sim-telemetry-row' },
-            h('div', { class: 'sim-tel-header' }, h('span', null, label), h('span', { class: `sim-tel-val ${colorClass}` }, valueStr)),
-            h('div', { class: 'sim-tel-bar' }, h('div', { class: `sim-tel-fill ${colorClass}`, style: { width: `${percentage}%` } }))
-        );
-    }
 
     private renderTooltips(state: any) {
         if (state.hoveredSatelliteId && state.tooltipPos) {
             const sat = state.satellites.get(state.hoveredSatelliteId);
-            if (sat) return h('div', { class: 'sat-intel-tooltip-modern', style: { left: `${state.tooltipPos.x + 15}px`, top: `${state.tooltipPos.y + 15}px` } }, h('div', { class: 'tt-title' }, sat.name));
+            if (sat) {
+                return h('div', {
+                    class: 'intel-tooltip-modern',
+                    style: { left: `${state.tooltipPos.x + 15}px`, top: `${state.tooltipPos.y + 15}px`, position: 'fixed' }
+                },
+                    h('div', { class: 'tt-header' },
+                        h('div', { class: 'tt-icon' }, '🛰️'),
+                        h('div', null,
+                            h('div', { class: 'tt-name' }, sat.name),
+                            h('div', { class: 'tt-category' }, sat.category.toUpperCase())
+                        )
+                    ),
+                    h('div', { class: 'tt-body' },
+                        h('div', { class: 'tt-row' }, h('span', null, 'CURRENT'), h('span', null, new Date(state.simulationTime).toLocaleTimeString([], { hour12: false }))),
+                        h('div', { class: 'tt-row' }, h('span', null, 'START'), h('span', null, new Date(sat.orbitStartTime).toLocaleTimeString([], { hour12: false }))),
+                        (state.dashboardType !== 'operate' && sat.orbitEndTime !== undefined && sat.orbitEndTime !== null) && h('div', { class: 'tt-row' }, h('span', null, 'END'), h('span', null, new Date(sat.orbitEndTime).toLocaleTimeString([], { hour12: false }))),
+                        h('div', { class: 'tt-row' }, h('span', null, 'LAT/LON'), h('span', null, `${sat.position.lat.toFixed(2)}°, ${sat.position.lon.toFixed(2)}°`)),
+                        h('div', { class: 'tt-row' }, h('span', null, 'ALTITUDE'), h('span', null, sat.position.alt.toFixed(0) + ' km'))
+                    )
+                );
+            }
+        }
+
+        if (state.hoveredGroundStationId && state.gsTooltipPos) {
+            const gs = state.groundStations?.find((g: any) => g.id === state.hoveredGroundStationId);
+            if (gs) {
+                return h('div', {
+                    class: 'intel-tooltip-modern',
+                    style: { left: `${state.gsTooltipPos.x + 15}px`, top: `${state.gsTooltipPos.y + 15}px`, position: 'fixed' }
+                },
+                    h('div', { class: 'tt-header' },
+                        h('div', { class: 'tt-icon' }, '📡'),
+                        h('div', null,
+                            h('div', { class: 'tt-name' }, gs.name),
+                            h('div', { class: 'tt-category' }, `${gs.country} · ${gs.agency}`)
+                        )
+                    ),
+                    h('div', { class: 'tt-body' },
+                        h('div', { class: 'tt-row' }, h('span', null, 'STATUS'), h('span', { style: { color: 'var(--sim-accent-green)' } }, gs.status?.toUpperCase() || 'ACTIVE')),
+                        h('div', { class: 'tt-row' }, h('span', null, 'COORDS'), h('span', null, `${gs.lat.toFixed(2)}°, ${gs.lon.toFixed(2)}°`)),
+                        h('div', { class: 'tt-row' }, h('span', null, 'HORIZON'), h('span', null, (gs.minElevation || 10) + '° ELEV'))
+                    )
+                );
+            }
         }
         return null;
     }

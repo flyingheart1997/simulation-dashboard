@@ -1,104 +1,102 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GroundStation } from '../modules/types';
+import { GroundStation, SimulatedSatellite } from '../modules/types';
 import { simulationStore } from '../stores/simulationStore';
+import { latLonToVector3 } from '../utils/coordUtils';
 
 /**
- * Creates a canvas texture for the ground station icon.
- * A distinct downward-triangle (dish) shape with a glowing green hue.
+ * Creates a modern, premium canvas texture for the ground station icon.
+ * Features a radar dish silhouette, concentric tech-rings, and signal pulses.
  */
-function createGSIconTexture(): THREE.Texture {
-    const size = 256;
+function createModernGSIconTexture(): THREE.Texture {
+    const size = 512;
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext('2d')!;
 
-    // ── Outer glow halo ──────────────────────────────────────────
-    const glow = ctx.createRadialGradient(128, 128, 10, 128, 128, 120);
-    glow.addColorStop(0, 'rgba(0, 255, 136, 0.25)');
-    glow.addColorStop(0.5, 'rgba(0, 255, 136, 0.08)');
+    const centerX = size / 2;
+    const centerY = size / 2;
+
+    // ── Outer Glow & Atmosphere ──────────────────────────────────
+    const glow = ctx.createRadialGradient(centerX, centerY, 50, centerX, centerY, 240);
+    glow.addColorStop(0, 'rgba(0, 255, 136, 0.15)');
+    glow.addColorStop(0.5, 'rgba(0, 255, 255, 0.05)');
     glow.addColorStop(1, 'rgba(0, 255, 136, 0)');
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, size, size);
 
-    ctx.strokeStyle = '#00ff88';
-    ctx.fillStyle = 'rgba(0, 255, 136, 0.85)';
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    // ── Parabolic dish bowl ──────────────────────────────────────
-    const dishX = 128;   // center
-    const dishY = 90;    // apex of the bowl (bottom)
-    const dishW = 80;    // half-width
-    const dishH = 45;    // depth
-
-    ctx.beginPath();
-    ctx.moveTo(dishX - dishW, dishY - dishH);
-    ctx.quadraticCurveTo(dishX, dishY + 20, dishX + dishW, dishY - dishH);
-    ctx.lineTo(dishX - dishW, dishY - dishH);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(0, 255, 136, 0.22)';
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(dishX - dishW, dishY - dishH);
-    ctx.quadraticCurveTo(dishX, dishY + 20, dishX + dishW, dishY - dishH);
-    ctx.strokeStyle = '#00ff88';
-    ctx.lineWidth = 3.5;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(dishX - dishW, dishY - dishH);
-    ctx.lineTo(dishX + dishW, dishY - dishH);
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // ── Feed arm (line from center of dish to focal point above) ─
-    ctx.beginPath();
-    ctx.moveTo(dishX, dishY + 10); // near apex
-    ctx.lineTo(dishX - 18, dishY - dishH - 18); // feed horn at left
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.fillStyle = '#00ff88';
-    ctx.fillRect(dishX - 22, dishY - dishH - 22, 8, 8);
-
-    // ── Vertical support mast ────────────────────────────────────
-    const mastTopY = dishY + 20;
-    const mastBotY = 195;
-    ctx.beginPath();
-    ctx.moveTo(dishX, mastTopY);
-    ctx.lineTo(dishX, mastBotY);
+    // ── Outer Tech-Rings (Dashed) ────────────────────────────────
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.4)';
+    ctx.setLineDash([15, 10]);
     ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 180, 0, Math.PI * 2);
     ctx.stroke();
 
-    // ── Platform / base legs ────────────────────────────────────
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.2)';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(dishX, mastBotY);
-    ctx.lineTo(dishX - 36, mastBotY + 18);
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(dishX, mastBotY);
-    ctx.lineTo(dishX + 36, mastBotY + 18);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(dishX - 40, mastBotY + 20);
-    ctx.lineTo(dishX + 40, mastBotY + 20);
-    ctx.lineWidth = 2.5;
+    ctx.arc(centerX, centerY, 210, 0, Math.PI * 2);
     ctx.stroke();
 
-    // ── Bright focal point dot ───────────────────────────────────
-    const dotGrad = ctx.createRadialGradient(dishX, dishY + 10, 0, dishX, dishY + 10, 8);
-    dotGrad.addColorStop(0, '#ffffff');
-    dotGrad.addColorStop(0.4, '#00ff88');
-    dotGrad.addColorStop(1, 'rgba(0,255,136,0)');
-    ctx.fillStyle = dotGrad;
+    // ── Concentric Inner UI Rings ────────────────────────────────
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.6)';
+    ctx.lineWidth = 6;
     ctx.beginPath();
-    ctx.arc(dishX, dishY + 10, 8, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, 140, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // ── Radar Dish Silhouette ───────────────────────────────────
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    
+    // Dish Base (Static)
+    ctx.fillStyle = '#00ff88';
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = '#00ff88';
+    
+    // Main Dish Curve
+    ctx.beginPath();
+    ctx.arc(0, -20, 80, Math.PI * 0.1, Math.PI * 0.9);
+    ctx.lineWidth = 12;
+    ctx.strokeStyle = '#00ff88';
+    ctx.stroke();
+
+    // Dish Support/Feed Horn
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, -60);
+    ctx.lineWidth = 8;
+    ctx.stroke();
+
+    // Signal Emission Point (Glowing Core)
+    const coreGrad = ctx.createRadialGradient(0, -70, 0, 0, -70, 20);
+    coreGrad.addColorStop(0, '#ffffff');
+    coreGrad.addColorStop(0.5, '#00ffff');
+    coreGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(0, -70, 15, 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.restore();
+
+    // ── Signal Pulse Lines ───────────────────────────────────────
+    ctx.strokeStyle = 'rgba(0, 255, 136, 0.8)';
+    ctx.lineWidth = 4;
+    for (let i = 0; i < 3; i++) {
+        const angle = -Math.PI / 2 + (i - 1) * 0.4;
+        const x1 = centerX + 100 * Math.cos(angle);
+        const y1 = centerY - 100 + 100 * Math.sin(angle);
+        const x2 = centerX + 140 * Math.cos(angle);
+        const y2 = centerY - 100 + 140 * Math.sin(angle);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.needsUpdate = true;
@@ -106,27 +104,22 @@ function createGSIconTexture(): THREE.Texture {
 }
 
 export class GroundStationLayer {
-    public points: THREE.Points;
+    private iconGroup: THREE.Group;
     private groundStations: GroundStation[] = [];
-    private geometry: THREE.BufferGeometry;
-    private focusedModel: THREE.Group | null = null;
-    private activeModelGsId: string | null = null;
-    private isZoomed: boolean = false;
-    private defaultCameraDistance = 25000;
-    private commLines: THREE.Line[] = [];
-    private commLinePulse = 0;
+    private iconMeshes: Map<string, THREE.Mesh> = new Map();
+    private commLines: Map<string, THREE.Line> = new Map();
+    
+    private cachedTexture: THREE.Texture | null = null;
+    private cachedGeometry: THREE.CircleGeometry | null = null;
 
     private scene: THREE.Scene;
     private camera: THREE.PerspectiveCamera;
     private controls: OrbitControls;
     private renderer: THREE.WebGLRenderer;
-    private raycaster = new THREE.Raycaster();
-    private mouse = new THREE.Vector2();
-
-    private boundClick: (e: MouseEvent) => void;
-    private boundMouseMove: (e: MouseEvent) => void;
 
     private static readonly RADIUS = 6371;
+    private static readonly ICON_BASE_UNIT = 400; // 400km base radius
+    private static readonly ICON_ALTITUDE = 100; // km above surface to clear data layers
 
     constructor(
         scene: THREE.Scene,
@@ -139,270 +132,210 @@ export class GroundStationLayer {
         this.controls = controls;
         this.renderer = renderer;
 
-        this.geometry = new THREE.BufferGeometry();
-        const iconTexture = createGSIconTexture();
-        const material = new THREE.PointsMaterial({
-            color: 0x00ff88,
-            size: 1400,
-            sizeAttenuation: true,
-            map: iconTexture,
+        this.iconGroup = new THREE.Group();
+        this.iconGroup.name = 'gs-icons';
+        scene.add(this.iconGroup);
+
+        this.cachedTexture = createModernGSIconTexture();
+        this.cachedGeometry = new THREE.CircleGeometry(1, 32); // Use 1 unit base, scale by ICON_BASE_UNIT
+    }
+
+    private createIconMesh(gs: GroundStation): THREE.Mesh {
+        const material = new THREE.MeshBasicMaterial({
+            map: this.cachedTexture,
             transparent: true,
-            alphaTest: 0.01,
-            depthWrite: false,
+            depthWrite: false, 
+            depthTest: true,
+            side: THREE.DoubleSide,
             blending: THREE.AdditiveBlending,
+            opacity: 0.95
         });
 
-        this.points = new THREE.Points(this.geometry, material);
-        this.points.frustumCulled = false;
-        this.points.renderOrder = 2;
-        scene.add(this.points);
+        const mesh = new THREE.Mesh(this.cachedGeometry!, material);
+        mesh.userData = { gsId: gs.id };
+        mesh.renderOrder = 200; // Highest priority for surface features
+        
+        const pos = latLonToVector3(gs.lat, gs.lon, GroundStationLayer.ICON_ALTITUDE);
+        mesh.position.copy(pos);
+        
+        // Orient flat to surface normal
+        const normal = pos.clone().normalize();
+        mesh.lookAt(pos.clone().add(normal));
 
-        this.boundClick = this.onClick.bind(this);
-        this.boundMouseMove = this.onMouseMove.bind(this);
-        renderer.domElement.addEventListener('click', this.boundClick);
-        renderer.domElement.addEventListener('mousemove', this.boundMouseMove);
+        // Set initial scale
+        mesh.scale.set(GroundStationLayer.ICON_BASE_UNIT, GroundStationLayer.ICON_BASE_UNIT, 1);
+        
+        return mesh;
     }
 
     updateStations(stations: GroundStation[]): void {
         this.groundStations = stations;
-        const positions = new Float32Array(stations.length * 3);
-
-        stations.forEach((gs, i) => {
-            const v = this.latLonToCartesian(gs.lat, gs.lon);
-            positions[i * 3] = v.x;
-            positions[i * 3 + 1] = v.y;
-            positions[i * 3 + 2] = v.z;
-        });
-
-        this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        this.geometry.computeBoundingSphere();
-        const bs = this.geometry.boundingSphere;
-        if (bs) bs.radius = 100000;
-        const posAttr = this.geometry.attributes['position'];
-        if (posAttr) posAttr.needsUpdate = true;
-    }
-
-    tick(): void {
-        const state = simulationStore.getState();
-        const selectedId = state.selectedGroundStationId;
-
-        this.updateCommLines(state);
-
-        if (selectedId) {
-            const gs = this.groundStations.find(g => g.id === selectedId);
-            if (gs) {
-                const pos = this.latLonToCartesian(gs.lat, gs.lon);
-                this.updateFocusedModel(pos, gs.id, pos.clone().normalize());
-
-                if (this.focusedModel?.userData['isPulseGroup']) {
-                    this.focusedModel.quaternion.copy(this.camera.quaternion);
-                    const p = 0.5 + 0.5 * Math.sin(Date.now() * 0.003);
-                    this.focusedModel.children.forEach((child, i) => {
-                        const mat = (child as THREE.LineLoop).material as THREE.LineBasicMaterial;
-                        if (mat) mat.opacity = i === 0 ? 0.5 + p * 0.5 : 0.2 + p * 0.3;
-                    });
-                }
-
-                this.controls.target.lerp(pos, 0.1);
-                const upDir = pos.clone().normalize();
-                const targetCamPos = pos.clone().add(upDir.multiplyScalar(150));
-                this.camera.position.lerp(targetCamPos, 0.06);
-                this.isZoomed = true;
-            }
-        } else {
-            this.removeFocusedModel();
-            this.resetZoom();
-        }
-    }
-
-    private onClick(e: MouseEvent): void {
-        const rect = this.renderer.domElement.getBoundingClientRect();
-        this.mouse.set(
-            ((e.clientX - rect.left) / rect.width) * 2 - 1,
-            -((e.clientY - rect.top) / rect.height) * 2 + 1
-        );
-        this.raycaster.setFromCamera(this.mouse, this.camera);
-        const camDist = this.camera.position.length();
-        this.raycaster.params.Points = { threshold: Math.max(30, camDist / 100) };
-        const hits = this.raycaster.intersectObject(this.points);
-        if (hits.length > 0) {
-            const hit = hits[0];
-            const idx = hit?.index ?? -1;
-            if (idx >= 0 && idx < this.groundStations.length) {
-                const gs = this.groundStations[idx];
-                if (gs) {
-                    simulationStore.selectGroundStation(gs.id);
-                    simulationStore.selectSatellite(null);
-                }
-            }
-        } else {
-            simulationStore.selectGroundStation(null);
-        }
-    }
-
-    private onMouseMove(e: MouseEvent): void {
-        const rect = this.renderer.domElement.getBoundingClientRect();
-        this.mouse.set(
-            ((e.clientX - rect.left) / rect.width) * 2 - 1,
-            -((e.clientY - rect.top) / rect.height) * 2 + 1
-        );
-        this.raycaster.setFromCamera(this.mouse, this.camera);
-        const camDist2 = this.camera.position.length();
-        this.raycaster.params.Points = { threshold: Math.max(30, camDist2 / 100) };
-        const hits = this.raycaster.intersectObject(this.points);
-        if (hits.length > 0) {
-            const hit = hits[0];
-            const idx = hit?.index ?? -1;
-            if (idx >= 0 && idx < this.groundStations.length) {
-                const gs = this.groundStations[idx];
-                if (gs) {
-                    simulationStore.hoverGroundStation(gs.id);
-                    simulationStore.setGsTooltipPos({ x: e.clientX, y: e.clientY });
-                    this.renderer.domElement.style.cursor = 'pointer';
-                    return;
-                }
-            }
-        }
-        simulationStore.hoverGroundStation(null);
-        simulationStore.setGsTooltipPos(null);
-        this.renderer.domElement.style.cursor = '';
-    }
-
-    private updateFocusedModel(pos: THREE.Vector3, gsId: string, surfaceNormal: THREE.Vector3): void {
-        if (!this.focusedModel || this.activeModelGsId !== gsId) {
-            this.removeFocusedModel();
-            this.focusedModel = this.createDishModel();
-            this.activeModelGsId = gsId;
-            this.scene.add(this.focusedModel);
-        }
-        this.focusedModel.position.copy(pos);
-    }
-
-    private createDishModel(): THREE.Group {
-        const group = new THREE.Group();
-        const buildRing = (radius: number, color: number, opacity: number) => {
-            const segments = 48;
-            const pts: THREE.Vector3[] = [];
-            for (let i = 0; i <= segments; i++) {
-                const a = (i / segments) * Math.PI * 2;
-                pts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0));
-            }
-            const geo = new THREE.BufferGeometry().setFromPoints(pts);
-            const mat = new THREE.LineBasicMaterial({
-                color,
-                transparent: true,
-                opacity,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending,
-            });
-            return new THREE.LineLoop(geo, mat);
-        };
-        group.add(buildRing(350, 0x00ff88, 0.9));
-        group.add(buildRing(550, 0x00ffcc, 0.4));
-        group.userData['isPulseGroup'] = true;
-        return group;
-    }
-
-    private updateCommLines(state: any): void {
-        for (const line of this.commLines) {
-            this.scene.remove(line);
-            line.geometry.dispose();
-            (line.material as THREE.Material).dispose();
-        }
-        this.commLines = [];
-
-        const satelliteMap = state.satellites as Map<string, any>;
-        if (!satelliteMap || satelliteMap.size === 0) return;
-
-        const satPositions: THREE.Vector3[] = [];
-        satelliteMap.forEach((sat: any) => {
-            if (sat?.position) {
-                const alt = sat.position.alt ?? 550;
-                const phi = (90 - sat.position.lat) * (Math.PI / 180);
-                const theta = (sat.position.lon + 180) * (Math.PI / 180);
-                const r = GroundStationLayer.RADIUS + alt;
-                satPositions.push(new THREE.Vector3(
-                    -r * Math.sin(phi) * Math.cos(theta),
-                    r * Math.cos(phi),
-                    r * Math.sin(phi) * Math.sin(theta)
-                ));
+        
+        // Remove stale meshes
+        const stationIds = new Set(stations.map(s => s.id));
+        this.iconMeshes.forEach((mesh, id) => {
+            if (!stationIds.has(id)) {
+                this.iconGroup.remove(mesh);
+                (mesh.material as THREE.Material).dispose();
+                this.iconMeshes.delete(id);
             }
         });
-        if (satPositions.length === 0) return;
 
-        this.commLinePulse = (this.commLinePulse + 0.025) % (Math.PI * 2);
-        const pulse = 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(this.commLinePulse));
-
-        const selectedGsId = state.selectedGroundStationId as string | null;
-
-        for (const gs of this.groundStations) {
-            const gsPos = this.latLonToCartesian(gs.lat, gs.lon);
-            let nearestPos: THREE.Vector3 | null = null;
-            let minDist = 12000;
-            for (const sp of satPositions) {
-                const d = gsPos.distanceTo(sp);
-                if (d < minDist) { minDist = d; nearestPos = sp; }
-            }
-            if (!nearestPos) continue;
-
-            const isSelected = gs.id === selectedGsId;
-            const geo = new THREE.BufferGeometry().setFromPoints([gsPos, nearestPos]);
-            const mat = new THREE.LineBasicMaterial({
-                color: isSelected ? 0x00ffff : 0x00ff44,
-                transparent: true,
-                opacity: isSelected ? Math.min(1, pulse + 0.3) : pulse * 0.7,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending,
-            });
-            const line = new THREE.Line(geo, mat);
-            this.scene.add(line);
-            this.commLines.push(line);
-        }
-    }
-
-    private resetZoom(): void {
-        if (this.isZoomed) {
-            this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.05);
-            const currentDist = this.camera.position.length();
-            if (currentDist < this.defaultCameraDistance - 100) {
-                const globalPos = this.camera.position.clone().setLength(this.defaultCameraDistance);
-                this.camera.position.lerp(globalPos, 0.05);
+        // Add/Update meshes
+        stations.forEach(gs => {
+            if (!this.iconMeshes.has(gs.id)) {
+                const mesh = this.createIconMesh(gs);
+                this.iconGroup.add(mesh);
+                this.iconMeshes.set(gs.id, mesh);
             } else {
-                this.isZoomed = false;
+                // Update position in case it changed (rare for GS but good practice)
+                const mesh = this.iconMeshes.get(gs.id)!;
+                const pos = latLonToVector3(gs.lat, gs.lon, GroundStationLayer.ICON_ALTITUDE);
+                mesh.position.copy(pos);
+                const normal = pos.clone().normalize();
+                mesh.lookAt(pos.clone().add(normal));
+            }
+        });
+    }
+
+    tick(selectedGsId: string | null = null, satPositions?: Map<string, THREE.Vector3>): void {
+        const state = simulationStore.getState();
+        const selectedId = selectedGsId || state.selectedGroundStationId;
+
+        this.updateCommLines(state, satPositions);
+
+        // Update scaling for selected state (Unified size for both cases)
+        this.iconMeshes.forEach((mesh) => {
+            const targetSize = GroundStationLayer.ICON_BASE_UNIT;
+            
+            if (mesh.scale.x !== targetSize) {
+                mesh.scale.set(targetSize, targetSize, 1);
+            }
+        });
+    }
+
+    public getIntersectedGsId(raycaster: THREE.Raycaster): string | null {
+        // Broad phase: just icons
+        const hits = raycaster.intersectObjects(this.iconGroup.children);
+        if (hits.length > 0) {
+            // Find the first hit that isn't occluded by Earth
+            // Sort hits by distance
+            hits.sort((a, b) => a.distance - b.distance);
+            
+            for (const hit of hits) {
+                // Occlusion Check: Does Earth block this Ground Station?
+                // Look for the Earth specifically using the group property
+                const earthObj = this.scene.children.find(c => (c as any).isEarthGroup);
+                if (earthObj) {
+                    const earthIntersects = raycaster.intersectObject(earthObj, true);
+                    if (earthIntersects.length > 0 && earthIntersects[0].distance < hit.distance - 10) {
+                        continue; // Blocked by Earth, try next GS hit
+                    }
+                }
+
+                return hit.object.userData.gsId;
             }
         }
+        return null;
     }
 
-    private removeFocusedModel(): void {
-        if (this.focusedModel) {
-            this.scene.remove(this.focusedModel);
-            this.focusedModel = null;
-            this.activeModelGsId = null;
+    private updateCommLines(state: any, satPositions?: Map<string, THREE.Vector3>): void {
+        if (!state.showCommLinks) {
+            this.commLines.forEach(line => line.visible = false);
+            return;
         }
-    }
-
-    private latLonToCartesian(lat: number, lon: number): THREE.Vector3 {
-        const phi = (90 - lat) * (Math.PI / 180);
-        const theta = (lon + 180) * (Math.PI / 180);
-        const r = GroundStationLayer.RADIUS + 250;
-        return new THREE.Vector3(
-            -r * Math.sin(phi) * Math.cos(theta),
-            r * Math.cos(phi),
-            r * Math.sin(phi) * Math.sin(theta)
-        );
+ 
+        const satelliteMap = state.satellites as Map<string, SimulatedSatellite>;
+        if (!satelliteMap || satelliteMap.size === 0) {
+            this.commLines.forEach(line => line.visible = false); // Hide all lines if no satellites
+            return;
+        }
+ 
+        const selectedGsId = state.selectedGroundStationId as string | null;
+        const activeGsIds = new Set<string>();
+ 
+        for (const gs of this.groundStations) {
+            // Comm lines start from surface height (35km for visibility)
+            const gsPos = latLonToVector3(gs.lat, gs.lon, 35);
+            const gsVec = gsPos.clone().normalize().multiplyScalar(GroundStationLayer.RADIUS);
+            const minElev = gs.minElevation || 10;
+ 
+            let bestSatPos: THREE.Vector3 | null = null;
+            let maxElev = -90;
+ 
+            if (satPositions) {
+                for (const [id, satPos] of satPositions.entries()) {
+                    const distSq = gsVec.distanceToSquared(satPos);
+                    if (distSq > 15000 * 15000) continue; // Prune distant satellites
+ 
+                    const rangeVec = satPos.clone().sub(gsVec);
+                    const upVec = gsVec.clone().normalize();
+                    const dot = rangeVec.normalize().dot(upVec);
+                    const elev = Math.asin(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI;
+ 
+                    if (elev > minElev && elev > maxElev) {
+                        maxElev = elev;
+                        bestSatPos = satPos;
+                    }
+                }
+            }
+ 
+            if (bestSatPos) {
+                const satPos = bestSatPos;
+                activeGsIds.add(gs.id);
+                const isSelected = gs.id === selectedGsId;
+ 
+                let line = this.commLines.get(gs.id);
+                
+                const earthRadius = GroundStationLayer.RADIUS;
+                const mid = gsPos.clone().lerp(satPos, 0.5).normalize().multiplyScalar(earthRadius + 1500);
+                const curve = new THREE.QuadraticBezierCurve3(gsPos, mid, satPos);
+                const points = curve.getPoints(12);
+ 
+                if (!line) {
+                    const geo = new THREE.BufferGeometry().setFromPoints(points);
+                    const mat = new THREE.LineBasicMaterial({
+                        color: isSelected ? 0x00ffff : 0x00ff88,
+                        transparent: true,
+                        opacity: 0.8,
+                        depthWrite: false,
+                        blending: THREE.AdditiveBlending,
+                    });
+                    line = new THREE.Line(geo, mat);
+                    line.renderOrder = 10;
+                    this.scene.add(line);
+                    this.commLines.set(gs.id, line);
+                } else {
+                    line.visible = true;
+                    line.geometry.setFromPoints(points);
+                    (line.material as THREE.LineBasicMaterial).color.setHex(isSelected ? 0x00ffff : 0x00ff88);
+                    (line.material as THREE.LineBasicMaterial).opacity = isSelected ? 1.0 : 0.8;
+                }
+            }
+        }
+ 
+        this.commLines.forEach((line, gsId) => {
+            if (!activeGsIds.has(gsId)) {
+                line.visible = false;
+            }
+        });
     }
 
     destroy(): void {
-        this.renderer.domElement.removeEventListener('click', this.boundClick);
-        this.renderer.domElement.removeEventListener('mousemove', this.boundMouseMove);
-        for (const line of this.commLines) {
+        this.commLines.forEach(line => {
             this.scene.remove(line);
             line.geometry.dispose();
             (line.material as THREE.Material).dispose();
-        }
-        this.geometry.dispose();
-        (this.points.material as THREE.PointsMaterial).dispose();
-        this.removeFocusedModel();
-        this.scene.remove(this.points);
+        });
+        
+        this.iconMeshes.forEach(mesh => {
+            this.iconGroup.remove(mesh);
+            mesh.geometry.dispose();
+            (mesh.material as THREE.Material).dispose();
+        });
+        
+        if (this.cachedTexture) this.cachedTexture.dispose();
+        if (this.cachedGeometry) this.cachedGeometry.dispose();
+        this.scene.remove(this.iconGroup);
     }
 }
