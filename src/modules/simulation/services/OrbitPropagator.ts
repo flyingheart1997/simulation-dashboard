@@ -5,6 +5,7 @@ export class OrbitPropagator {
     private satrec: satellite.SatRec;
     private pathPoints: { time: number; pos: SatellitePosition }[] = [];
     private lastPathUpdate: number = 0;
+    private lastCurrentTime: number = 0;
 
     constructor(line1: string, line2: string) {
         this.satrec = satellite.twoline2satrec(line1, line2);
@@ -38,15 +39,15 @@ export class OrbitPropagator {
      * 4. Optimization: Uses "Shift & Push" caching to update only necessary points every 60s.
      */
     getOrbitPath(
-        currentTime: Date, 
-        orbitStartTimeMs: number, 
-        orbitEndTimeMs?: number, 
+        currentTime: Date,
+        orbitStartTimeMs: number,
+        orbitEndTimeMs?: number,
         isInitialized: boolean = true,
         dashboardType: 'simulation' | 'summary' | 'operate' = 'operate'
     ): SatellitePosition[] {
         const nowMs = currentTime.getTime();
         const totalDuration = orbitEndTimeMs ? (orbitEndTimeMs - orbitStartTimeMs) : Infinity;
-        
+
         // 1. RULE: If total duration <= 90m, always show full orbit
         if (totalDuration <= 90 * 60000) {
             if (this.pathPoints.length === 0) {
@@ -82,6 +83,14 @@ export class OrbitPropagator {
         if (windowStart < orbitStartTimeMs) windowStart = orbitStartTimeMs;
 
         // 3. Update throttle: Only update if time moved significantly or first time
+        const timeJump = Math.abs(nowMs - this.lastCurrentTime);
+        this.lastCurrentTime = nowMs;
+
+        if (timeJump > 10 * 60000) {
+            // Large jump detected (e.g. scrubbing): Reset cache
+            this.pathPoints = [];
+        }
+
         if (Math.abs(nowMs - this.lastPathUpdate) < 60000 && this.pathPoints.length > 0) {
             // Check if we just crossed the 60m threshold (force update if so)
             const wasBeforeThreshold = (this.lastPathUpdate - orbitStartTimeMs) < 60 * 60000;
@@ -110,7 +119,7 @@ export class OrbitPropagator {
                 const pos = this.propagate(new Date(lastT));
                 if (pos) this.pathPoints.push({ time: lastT, pos });
             }
-            
+
             // Unshift past points (for rewind or initialization jumps)
             let firstT = this.pathPoints.length > 0 ? this.pathPoints[0].time : windowEnd;
             while (firstT > windowStart) {

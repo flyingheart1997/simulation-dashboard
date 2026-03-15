@@ -3,12 +3,13 @@ import { SimulationDashboard } from './SimulationDashboard';
 import { SatelliteSimulation } from './SatelliteSimulation';
 import { simulationStore } from '../stores/simulationStore';
 
-export class SimulationComponent {
+export class SimulationManager {
     private container: HTMLElement | null = null;
     private dashboardRoot: HTMLElement | null = null;
     private simulation: SatelliteSimulation | null = null;
     private isActive: boolean = false;
     private onExitCallback: (() => void) | null = null;
+    private updateInterval: any;
 
     constructor() {
         // Global access for the exit button inside SimulationDashboard
@@ -26,6 +27,10 @@ export class SimulationComponent {
         // Create main container
         this.container = document.createElement('div');
         this.container.className = 'simulation-view-container';
+        this.container.style.width = '100%';
+        this.container.style.height = '100%';
+        this.container.style.position = 'relative';
+        this.container.style.backgroundColor = '#000';
         parent.appendChild(this.container);
 
         // Create 3D Scene Container
@@ -53,7 +58,6 @@ export class SimulationComponent {
         this.startUpdateLoop();
     }
 
-    private updateInterval: any;
     private startUpdateLoop() {
         let lastTime = performance.now();
         const loop = (now: number) => {
@@ -104,18 +108,7 @@ export class SimulationComponent {
     public isVisible(): boolean {
         return this.isActive;
     }
-
-    /**
-     * Toggles the simulation view on/off.
-     */
-    public toggle(parent: HTMLElement): void {
-        if (this.isActive) {
-            this.hide();
-        } else {
-            this.show(parent);
-        }
-    }
 }
 
 // Export singleton instance
-export const simulationView = new SimulationComponent();
+export const simulationView = new SimulationManager();

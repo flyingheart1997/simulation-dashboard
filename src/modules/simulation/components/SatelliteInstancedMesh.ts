@@ -13,7 +13,7 @@ export class SatelliteInstancedMesh {
     constructor(scene: THREE.Scene, initialCount: number = 0) {
         this.scene = scene;
         this.maxCount = Math.max(initialCount, 15000);
-        
+
         ['starlink', 'gps', 'weather', 'communication', 'operational', 'default'].forEach(cat => {
             this.initCategoryMesh(cat);
         });
@@ -44,7 +44,7 @@ export class SatelliteInstancedMesh {
         (mesh as any).category = category;
         mesh.frustumCulled = false;
         mesh.renderOrder = 5;
-        
+
         this.geometries.set(category, geometry);
         this.positionBuffers.set(category, positions);
         this.colorBuffers.set(category, colors);
@@ -86,7 +86,7 @@ export class SatelliteInstancedMesh {
         ctx.translate(cx, cy);
         ctx.rotate(-Math.PI / 6); // slight upward tilt
         ctx.beginPath();
-        
+
         // Vary shape based on category
         if (category === 'starlink') {
             // Simple dash
@@ -106,7 +106,7 @@ export class SatelliteInstancedMesh {
             ctx.moveTo(-24, -24); ctx.lineTo(24, 24);
             ctx.moveTo(24, -24); ctx.lineTo(-24, 24);
         }
-        
+
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.lineWidth = 2;
         ctx.stroke();
@@ -116,14 +116,14 @@ export class SatelliteInstancedMesh {
         return texture;
     }
 
-    updatePositions(satellites: SimulatedSatellite[]) {
+    updatePositions(satellites: Map<string, SimulatedSatellite>, cartesianPositions: Map<string, THREE.Vector3>) {
         const categoryGroups = new Map<string, SimulatedSatellite[]>();
-        satellites.forEach(s => {
-            const cat = (s.category || 'default').toLowerCase();
+        for (const sat of satellites.values()) {
+            const cat = (sat.category || 'default').toLowerCase();
             const list = categoryGroups.get(cat) || [];
-            list.push(s);
+            list.push(sat);
             categoryGroups.set(cat, list);
-        });
+        }
 
         this.geometries.forEach((geo, cat) => {
             const sats = categoryGroups.get(cat) || [];
@@ -132,15 +132,14 @@ export class SatelliteInstancedMesh {
 
             for (let i = 0; i < sats.length; i++) {
                 const sat = sats[i];
-                const phi = (90 - sat.position.lat) * (Math.PI / 180);
-                const theta = (sat.position.lon + 180) * (Math.PI / 180);
-                const r = 6371 + sat.position.alt;
-
-                posAttr.setXYZ(i, 
-                    -r * Math.sin(phi) * Math.cos(theta),
-                    r * Math.cos(phi),
-                    r * Math.sin(phi) * Math.sin(theta)
-                );
+                const pos = cartesianPositions.get(sat.id);
+                
+                if (pos) {
+                    posAttr.setXYZ(i, pos.x, pos.y, pos.z);
+                } else {
+                    // Fallback to zero if position not found (shouldn't happen with unified cache)
+                    posAttr.setXYZ(i, 0, 0, 0);
+                }
 
                 const color = getSatelliteColor(sat.category, sat.id);
                 if (sat.isSelected) color.setHex(0xffffff);

@@ -26,7 +26,7 @@ export default function Home() {
             <OriginalSimulation
                 satellites={MOCK_SATELLITES}
                 groundStations={MOCK_GROUND_STATIONS}
-                dashboardType='summary'
+                dashboardType='simulation'
             />
         </main>
     );

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import gsap from 'gsap';
 import { EarthScene } from './EarthScene';
 import { SatelliteInstancedMesh } from './SatelliteInstancedMesh';
 import { GroundStationLayer } from './GroundStationMesh';
@@ -16,17 +17,16 @@ export class SatelliteSimulation {
     private controls: OrbitControls;
     private earth: EarthScene;
     private instancedMesh: SatelliteInstancedMesh | null = null;
-    private animationId: number | null = null;
     private raycaster: THREE.Raycaster = new THREE.Raycaster();
     private mouse: THREE.Vector2 = new THREE.Vector2();
     private container: HTMLElement;
-    private satelliteIds: string[] = [];
     private focusedModel: THREE.Group | null = null;
     private activeModelSatId: string | null = null;
     private orbitPathLines: Map<string, THREE.Line> = new Map();
     private isZoomed: boolean = false;
     private lastSelectedSatId: string | null = null;
-    private defaultCameraDistance = 25000;
+    private lastSelectedGsId: string | null = null;
+    private defaultCameraDistance = 45000;
     private groundStationLayer: GroundStationLayer | null = null;
     private sunLight: THREE.DirectionalLight;
     private boundResize: () => void;
@@ -42,9 +42,13 @@ export class SatelliteSimulation {
         this.scene = new THREE.Scene();
 
         this.camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 10, 2000000);
-        this.camera.position.set(0, 15000, 30000);
+        this.camera.position.set(12000, 12000, 24000);
 
-        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        this.renderer = new THREE.WebGLRenderer({ 
+            antialias: true, 
+            alpha: true,
+            logarithmicDepthBuffer: true // Anti-flicker for space scale
+        });
         this.renderer.setSize(container.clientWidth, container.clientHeight);
         this.renderer.setPixelRatio(window.devicePixelRatio);
         container.appendChild(this.renderer.domElement);
@@ -55,6 +59,10 @@ export class SatelliteSimulation {
         this.controls.minDistance = 7500;
         this.controls.maxDistance = 500000;
 
+        // TRACK INTERACTION
+        this.controls.addEventListener('start', () => { (this as any)._isInteracting = true; });
+        this.controls.addEventListener('end', () => { (this as any)._isInteracting = false; });
+
         const ambientLight = new THREE.AmbientLight(0x404040, 2);
         this.scene.add(ambientLight);
 
@@ -63,7 +71,9 @@ export class SatelliteSimulation {
         this.scene.add(this.sunLight);
 
         this.earth = new EarthScene(this.scene);
-        this.scene.add(this.earth.getGroup());
+        const earthGroup = this.earth.getGroup();
+        earthGroup.name = 'earth';
+        this.scene.add(earthGroup);
 
         this.boundResize = this.onResize.bind(this);
         this.boundClick = this.onClick.bind(this);
@@ -81,7 +91,6 @@ export class SatelliteSimulation {
     }
 
     initSatellites(satellites: SimulatedSatellite[]): void {
-        this.satelliteIds = satellites.map(s => s.id);
         if (this.instancedMesh) {
             this.instancedMesh.destroy();
         }
@@ -93,15 +102,14 @@ export class SatelliteSimulation {
         const hoveredId = state.hoveredSatelliteId;
         const selectedId = state.selectedSatelliteId;
 
-        if (!this.instancedMesh || this.satelliteIds.length !== satellites.length) {
+        if (!this.instancedMesh) {
             if (satellites.length > 0) {
                 this.initSatellites(satellites);
             }
+            return;
         }
 
         if (this.instancedMesh && satellites.length > 0) {
-            this.instancedMesh.updatePositions(satellites);
-
             const activeOrbitIds = new Set<string>();
             if (selectedId) activeOrbitIds.add(selectedId);
             if (hoveredId) activeOrbitIds.add(hoveredId);
@@ -122,53 +130,9 @@ export class SatelliteSimulation {
                 }
             }
 
-            if (selectedId) {
-                const sat = satellites.find(s => s.id === selectedId);
-                if (sat && sat.position) {
-                    const pos = latLonToVector3(sat.position.lat, sat.position.lon, sat.position.alt);
-                    const satColor = getSatelliteColor(sat.category, sat.id);
-
-                    let velocityVector = new THREE.Vector3(1, 0, 0);
-                    if (sat.orbitPath && sat.orbitPath.length > 1) {
-                        const p1 = latLonToVector3(sat.position.lat, sat.position.lon, sat.position.alt);
-                        const nextPos = sat.orbitPath[0];
-                        if (nextPos) {
-                            const p2 = latLonToVector3(nextPos.lat, nextPos.lon, nextPos.alt);
-                            velocityVector = p2.clone().sub(p1).normalize();
-                        }
-                    }
-
-                    this.updateFocusedModel(pos, velocityVector, sat.id, satColor);
-
-                    if (this.lastSelectedSatId !== selectedId) {
-                        this.isZoomed = false;
-                        this.lastSelectedSatId = selectedId;
-                    }
-
-                    const upDir = pos.clone().normalize();
-                    const desiredCamPos = pos.clone().add(upDir.multiplyScalar(4000));
-
-                    if (!this.isZoomed) {
-                        this.controls.target.lerp(pos, 0.1);
-                        this.camera.position.lerp(desiredCamPos, 0.05);
-                        if (this.camera.position.distanceTo(desiredCamPos) < 100) {
-                            this.isZoomed = true;
-                            this.controls.minDistance = 500;
-                        }
-                    } else {
-                        const lastSatPos = this.lastFollowSatPos || pos.clone();
-                        this.lastFollowSatPos = pos.clone();
-                        const v1 = lastSatPos.clone().normalize();
-                        const v2 = pos.clone().normalize();
-                        const quaternion = new THREE.Quaternion().setFromUnitVectors(v1, v2);
-                        this.camera.position.applyQuaternion(quaternion);
-                        this.controls.target.set(0, 0, 0);
-                    }
-                }
-            } else {
+            if (!selectedId) {
                 this.controls.minDistance = 7500;
                 this.removeFocusedModel();
-                this.resetCameraZoom();
             }
 
             const currentGs = simulationStore.getState().groundStations;
@@ -180,22 +144,38 @@ export class SatelliteSimulation {
     }
 
     private resetCameraZoom() {
+        const state = simulationStore.getState();
         this.lastSelectedSatId = null;
+        this.lastSelectedGsId = null;
         this.lastFollowSatPos = null;
+        this.isZoomed = false;
 
-        const targetOrigin = new THREE.Vector3(0, 0, 0);
-        const distToOrigin = this.controls.target.length();
-        const distToDefault = Math.abs(this.camera.position.length() - this.defaultCameraDistance);
+        this.cameraTween?.kill();
+        this.targetTween?.kill();
 
-        if (distToOrigin > 10 || distToDefault > 100) {
-            this.controls.target.lerp(targetOrigin, 0.08);
-            const globalPos = this.camera.position.clone().setLength(this.defaultCameraDistance);
-            this.camera.position.lerp(globalPos, 0.08);
-        } else {
-            this.isZoomed = false;
-            this.controls.minDistance = 7500;
-            this.controls.target.copy(targetOrigin);
-        }
+        // Closer Home positions for better visibility
+        const targetPos = state.viewMode === '2d' 
+            ? new THREE.Vector3(0, 0, 35000) 
+            : new THREE.Vector3(12000, 12000, 24000);
+
+        this.targetTween = gsap.to(this.controls.target, {
+            x: 0,
+            y: 0,
+            z: 0,
+            duration: 1.5,
+            ease: "power2.inOut"
+        });
+
+        this.cameraTween = gsap.to(this.camera.position, {
+            x: targetPos.x,
+            y: targetPos.y,
+            z: targetPos.z,
+            duration: 1.5,
+            ease: "power2.inOut",
+            onComplete: () => {
+                this.controls.minDistance = 7500;
+            }
+        });
     }
 
     private updateFocusedModel(pos: THREE.Vector3, velocity: THREE.Vector3, satId: string, color: THREE.Color) {
@@ -284,6 +264,7 @@ export class SatelliteSimulation {
         if (this.focusedModel) {
             this.scene.remove(this.focusedModel);
             this.focusedModel = null;
+            this.activeModelSatId = null;
         }
     }
 
@@ -293,64 +274,98 @@ export class SatelliteSimulation {
         this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
         this.raycaster.setFromCamera(this.mouse, this.camera);
         const camDist = this.camera.position.length();
-        this.raycaster.params.Points = { threshold: Math.max(20, camDist / 120) };
+        // Tightened threshold for more precise hovering (approx 8 pixels)
+        this.raycaster.params.Points = { threshold: Math.max(15, camDist / 160) };
     }
 
     private onClick(event: MouseEvent) {
         this.updateRaycaster(event);
-        const satId = this.getIntersectedSatelliteId();
-
+        
+        const satHit = this.getIntersectedSatelliteHit();
         const gsId = this.groundStationLayer?.getIntersectedGsId(this.raycaster);
-        const earthIntersect = this.raycaster.intersectObject(this.earth.getGroup(), true);
-
-        if (satId) {
-            simulationStore.selectSatellite(satId);
+        const earthIntersect = this.raycaster.intersectObject(this.scene.getObjectByName('earth') || this.scene, true);
+        
+        // Pick the closest hit logically
+        // Note: For GS, we don't have the distance here easily without refactoring GS layer, 
+        // but we can assume if gsId is found, it's a valid intent.
+        
+        if (satHit && !gsId) {
+            simulationStore.selectSatellite(satHit.id);
             simulationStore.selectGroundStation(null);
             this.lastFollowSatPos = null;
+            this.isZoomed = false;
         } else if (gsId) {
             simulationStore.selectGroundStation(gsId);
             simulationStore.selectSatellite(null);
             this.lastFollowSatPos = null;
+            this.isZoomed = false;
+            this.lastSelectedSatId = null;
+            this.removeFocusedModel();
         } else if (earthIntersect.length > 0) {
-            // Earth click
+            // Clicked on Earth -> Do nothing, don't reset camera
         } else {
-            simulationStore.selectSatellite(null);
-            simulationStore.selectGroundStation(null);
-            this.resetCameraZoom();
+            // Clicked on empty space -> Reset only if something was selected
+            const state = simulationStore.getState();
+            if (state.selectedSatelliteId || state.selectedGroundStationId) {
+                simulationStore.selectSatellite(null);
+                simulationStore.selectGroundStation(null);
+                this.resetCameraZoom();
+            }
             this.lastFollowSatPos = null;
         }
     }
 
     private onMouseMove(event: MouseEvent) {
         this.updateRaycaster(event);
-        const id = this.getIntersectedSatelliteId();
-        simulationStore.hoverSatellite(id);
+        
+        const satHit = this.getIntersectedSatelliteHit();
+        const gsId = this.groundStationLayer?.getIntersectedGsId(this.raycaster);
 
-        if (id) {
+        if (satHit) {
+            simulationStore.hoverSatellite(satHit.id);
+            simulationStore.hoverGroundStation(null);
             simulationStore.setTooltipPos({ x: event.clientX, y: event.clientY });
+            simulationStore.setGsTooltipPos(null);
+            this.renderer.domElement.style.cursor = 'pointer';
+        } else if (gsId) {
+            simulationStore.hoverGroundStation(gsId);
+            simulationStore.hoverSatellite(null);
+            simulationStore.setGsTooltipPos({ x: event.clientX, y: event.clientY });
+            simulationStore.setTooltipPos(null);
             this.renderer.domElement.style.cursor = 'pointer';
         } else {
+            simulationStore.hoverSatellite(null);
+            simulationStore.hoverGroundStation(null);
             simulationStore.setTooltipPos(null);
+            simulationStore.setGsTooltipPos(null);
             this.renderer.domElement.style.cursor = 'default';
         }
     }
 
-    private getIntersectedSatelliteId(): string | null {
+    private getIntersectedSatelliteHit(): { id: string, distance: number } | null {
         if (!this.instancedMesh) return null;
+        
         const meshes = this.instancedMesh.getMeshes();
-        const intersects = this.raycaster.intersectObjects(meshes);
+        const satIntersects = this.raycaster.intersectObjects(meshes);
+        if (satIntersects.length === 0) return null;
 
-        if (intersects && intersects.length > 0) {
-            const first = intersects[0];
-            const mesh = first.object as any;
-            const index = first.index;
+        const firstSat = satIntersects[0];
+        
+        // 1. Occlusion Check: Does Earth block this satellite?
+        const earthIntersect = this.raycaster.intersectObject(this.earth.getGroup(), true);
+        if (earthIntersect.length > 0 && earthIntersect[0].distance < firstSat.distance) {
+            return null; // Earth is in front
+        }
 
-            if (index !== undefined && mesh.category) {
-                const state = simulationStore.getState();
-                const satellites = Array.from(state.satellites.values()) as SimulatedSatellite[];
-                const catSats = satellites.filter(s => s.category.toLowerCase() === mesh.category);
-                return catSats[index]?.id || null;
-            }
+        const mesh = firstSat.object as any;
+        const index = firstSat.index;
+
+        if (index !== undefined && mesh.category) {
+            const state = simulationStore.getState();
+            const satellites = Array.from(state.satellites.values()) as SimulatedSatellite[];
+            const catSats = satellites.filter(s => s.category.toLowerCase() === mesh.category);
+            const id = catSats[index]?.id;
+            if (id) return { id, distance: firstSat.distance };
         }
         return null;
     }
@@ -362,61 +377,174 @@ export class SatelliteSimulation {
     }
 
     private lastViewMode: string = '3d';
-    private transitionFactor: number = 0;
-    private isTransitioning: boolean = false;
+    private satCartesianPositions: Map<string, THREE.Vector3> = new Map();
+    private cameraTween: gsap.core.Tween | null = null;
+    private targetTween: gsap.core.Tween | null = null;
 
     public tick(): void {
         const state = simulationStore.getState();
 
+        // 1. Scene Transition (2D/3D via GSAP)
         if (state.viewMode !== this.lastViewMode) {
             this.lastViewMode = state.viewMode;
-            this.isTransitioning = true;
-            this.transitionFactor = 0;
+            
+            const targetPos = state.viewMode === '2d' 
+                ? new THREE.Vector3(0, 0, 35000) 
+                : new THREE.Vector3(12000, 12000, 24000);
+            
+            this.cameraTween?.kill();
+            this.targetTween?.kill();
+
+            this.cameraTween = gsap.to(this.camera.position, {
+                x: targetPos.x,
+                y: targetPos.y,
+                z: targetPos.z,
+                duration: 1.5,
+                ease: "power2.inOut"
+            });
+
+            this.targetTween = gsap.to(this.controls.target, {
+                x: 0, y: 0, z: 0,
+                duration: 1.5,
+                ease: "power2.inOut"
+            });
         }
 
-        if (this.isTransitioning) {
-            this.transitionFactor += 0.02;
-            if (this.transitionFactor >= 1) {
-                this.transitionFactor = 1;
-                this.isTransitioning = false;
+        // 2. PRE-CALCULATE COORDINATES (Single Pass)
+        this.satCartesianPositions.clear();
+        state.satellites.forEach((sat: SimulatedSatellite) => {
+            if (sat.position) {
+                this.satCartesianPositions.set(
+                    sat.id, 
+                    latLonToVector3(sat.position.lat, sat.position.lon, sat.position.alt)
+                );
             }
+        });
 
-            if (state.viewMode === '2d') {
-                const targetPos = new THREE.Vector3(0, 0, 45000);
-                this.camera.position.lerp(targetPos, 0.1);
-                this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.1);
-            } else {
-                const targetPos = new THREE.Vector3(15000, 15000, 30000);
-                this.camera.position.lerp(targetPos, 0.1);
-                this.controls.target.lerp(new THREE.Vector3(0, 0, 0), 0.1);
+        // 3. Selection & Tracking Logic
+        const selectedId = state.selectedSatelliteId;
+        const selectedGsId = state.selectedGroundStationId;
+
+        if (selectedId) {
+            const sat = state.satellites.get(selectedId);
+            const pos = this.satCartesianPositions.get(selectedId);
+            const propagator = simulationStore.getPropagators().get(selectedId);
+
+            if (sat && pos && propagator) {
+                const satColor = getSatelliteColor(sat.category, sat.id);
+
+                // High-precision orientation (Lookahead +1s)
+                const lookaheadTime = new Date(state.simulationTime.getTime() + 1000);
+                const nextLla = propagator.propagate(lookaheadTime);
+                let velocityVector = new THREE.Vector3(1, 0, 0);
+                if (nextLla) {
+                    const nextPos = latLonToVector3(nextLla.lat, nextLla.lon, nextLla.alt);
+                    velocityVector.copy(nextPos).sub(pos).normalize();
+                }
+
+                this.updateFocusedModel(pos, velocityVector, sat.id, satColor);
+
+                if (this.lastSelectedSatId !== selectedId) {
+                    this.lastSelectedSatId = selectedId;
+                    this.lastSelectedGsId = null;
+                    this.isZoomed = false;
+                    this.controls.minDistance = 500; // Allow close zoom
+                    
+                    // Smooth Jump to Satellite using GSAP
+                    this.cameraTween?.kill();
+                    this.targetTween?.kill();
+                    
+                    const upDir = pos.clone().normalize();
+                    const desiredCamPos = pos.clone().add(upDir.multiplyScalar(10000));
+                    
+                    this.targetTween = gsap.to(this.controls.target, {
+                        x: pos.x, y: pos.y, z: pos.z,
+                        duration: 1.2,
+                        ease: "power3.out"
+                    });
+                    
+                    this.cameraTween = gsap.to(this.camera.position, {
+                        x: desiredCamPos.x, y: desiredCamPos.y, z: desiredCamPos.z,
+                        duration: 1.2,
+                        ease: "power3.out",
+                        onComplete: () => { this.isZoomed = true; }
+                    });
+                } else if (this.isZoomed && !(this as any)._isInteracting) {
+                    // Constant Update (Sync with prop) ONLY IF NOT INTERACTING
+                    const lastSatPos = this.lastFollowSatPos || pos.clone();
+                    this.lastFollowSatPos = pos.clone();
+                    
+                    const v1 = lastSatPos.clone().normalize();
+                    const v2 = pos.clone().normalize();
+                    const quaternion = new THREE.Quaternion().setFromUnitVectors(v1, v2);
+                    
+                    this.camera.position.applyQuaternion(quaternion);
+                    this.controls.target.copy(pos);
+                }
+            }
+        } else if (selectedGsId) {
+            const gs = state.groundStations?.find((g: any) => g.id === selectedGsId);
+            if (gs) {
+                const pos = latLonToVector3(gs.lat, gs.lon, 35);
+                if (this.lastSelectedGsId !== selectedGsId) {
+                    this.lastSelectedGsId = selectedGsId;
+                    this.lastSelectedSatId = null;
+                    this.isZoomed = false;
+                    this.controls.minDistance = 500;
+
+                    this.cameraTween?.kill();
+                    this.targetTween?.kill();
+
+                    const upDir = pos.clone().normalize();
+                    const targetCamPos = pos.clone().add(upDir.multiplyScalar(10000));
+
+                    this.targetTween = gsap.to(this.controls.target, {
+                        x: pos.x, y: pos.y, z: pos.z,
+                        duration: 1.5,
+                        ease: "power2.inOut"
+                    });
+
+                    this.cameraTween = gsap.to(this.camera.position, {
+                        x: targetCamPos.x, y: targetCamPos.y, z: targetCamPos.z,
+                        duration: 1.5,
+                        ease: "power2.inOut",
+                        onComplete: () => { this.isZoomed = true; }
+                    });
+                }
+            }
+        } else {
+            if (this.lastSelectedSatId || this.lastSelectedGsId) {
+                this.lastSelectedSatId = null;
+                this.lastSelectedGsId = null;
+                this.removeFocusedModel();
             }
         }
 
         this.controls.update();
+
+        // 4. Update Layers using the cached positions
         const sunPos = getSunPosition(state.simulationTime);
         this.sunLight.position.copy(sunPos).multiplyScalar(100000);
 
-        // Pre-calculate Cartesian positions for all layers
-        const satellites = Array.from(state.satellites.values()) as SimulatedSatellite[];
-        const satPositions = new Map<string, THREE.Vector3>();
-        satellites.forEach(sat => {
-            if (sat.position) {
-                satPositions.set(sat.id, latLonToVector3(sat.position.lat, sat.position.lon, sat.position.alt));
-            }
-        });
-
         this.earth.update(this.camera.position, state.visibleLayers, state.selectedMap, state.showDayNightLayer, sunPos);
-        this.updateSimulationLayers(state, satPositions);
-        this.groundStationLayer?.tick(null, satPositions);
+        
+        if (this.instancedMesh) {
+            this.instancedMesh.updatePositions(state.satellites, this.satCartesianPositions);
+        }
+
+        this.updateSimulationLayers(state, this.satCartesianPositions);
+        this.groundStationLayer?.tick(null, this.satCartesianPositions);
+
         this.renderer.render(this.scene, this.camera);
     }
 
+    private static readonly UP_VEC = new THREE.Vector3(0, 1, 0);
+
     private updateSimulationLayers(state: any, satPositions: Map<string, THREE.Vector3>) {
-        const satellites = Array.from(state.satellites.values()) as SimulatedSatellite[];
         const groundStations = state.groundStations;
 
         if (state.showVisibilityCones) {
-            satellites.forEach(sat => {
+            state.satellites.forEach((sat: SimulatedSatellite) => {
                 const id = sat.id;
                 let cone = this.visibilityCones.get(id);
                 const pos = satPositions.get(id);
@@ -443,7 +571,7 @@ export class SatelliteSimulation {
                 const halfAngle = 45 * Math.PI / 180;
                 const baseRadius = height * Math.tan(halfAngle);
                 cone.scale.set(baseRadius, height, baseRadius);
-                cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+                cone.quaternion.setFromUnitVectors(SatelliteSimulation.UP_VEC, dir);
             });
         } else {
             this.visibilityCones.forEach(c => c.visible = false);

@@ -133,7 +133,7 @@ class SimulationStore {
 
     public seedManualData(satellites: KeplerParams[], groundStations: any[]) {
         console.log('[SimulationStore] Seeding manual data', { satCount: satellites.length, gsCount: groundStations.length });
-        
+
         this.isManualMode = true;
         this.state.satellites.clear();
         this.propagators.clear();
@@ -189,11 +189,11 @@ class SimulationStore {
     private calculateNextTime(dtMs: number): Date {
         const dtSeconds = (dtMs / 1000) * this.state.speed;
         const nextTimeMs = this.state.simulationTime.getTime() + dtSeconds * 1000;
-        
+
         // Find global simulation boundaries
         let minStart = Infinity;
         let maxEnd = -Infinity;
-        
+
         this.state.satellites.forEach(sat => {
             if (sat.orbitStartTime) minStart = Math.min(minStart, sat.orbitStartTime);
             if (sat.orbitEndTime) maxEnd = Math.max(maxEnd, sat.orbitEndTime);
@@ -273,7 +273,7 @@ class SimulationStore {
                         sat.orbitStartTime,
                         sat.orbitEndTime,
                         isInit,
-                        this.state.dashboardType 
+                        this.state.dashboardType
                     );
                 }
             }
@@ -392,7 +392,7 @@ class SimulationStore {
         const stepMinutes = 2;
         const totalSteps = (durationHours * 60) / stepMinutes;
 
-        satellites.slice(0, 50).forEach(sat => { 
+        satellites.slice(0, 50).forEach(sat => {
             const propagator = this.propagators.get(sat.id);
             if (!propagator) return;
 

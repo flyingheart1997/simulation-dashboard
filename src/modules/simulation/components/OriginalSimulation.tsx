@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { KeplerParams, ManualGroundStation, DashboardType } from '../modules/types';
-import { simulationView } from './index';
+import { simulationView } from './SimulationManager';
 import { simulationStore } from '../stores/simulationStore';
 
 interface OriginalSimulationProps {
