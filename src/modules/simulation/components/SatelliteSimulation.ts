@@ -10,6 +10,18 @@ import { getSunPosition } from '../utils/sunUtils';
 import { getSatelliteColor } from '../utils/satelliteUtils';
 import { latLonToVector3 } from '../utils/coordUtils';
 
+type VisibilityTargetKind = 'ground-station' | 'point-target' | 'area-of-interest';
+
+interface VisibilityTarget {
+    id: string;
+    kind: VisibilityTargetKind;
+    label: string;
+    position: THREE.Vector3;
+    normal: THREE.Vector3;
+    radiusKm: number;
+    minElevationDeg: number;
+}
+
 export class SatelliteSimulation {
     private scene: THREE.Scene;
     private camera: THREE.PerspectiveCamera;
@@ -36,6 +48,21 @@ export class SatelliteSimulation {
 
     private visibilityCones: Map<string, THREE.Mesh> = new Map();
     private gsCoverageMeshes: Map<string, THREE.Mesh> = new Map();
+    private visibilityConeGeometry: THREE.ConeGeometry = new THREE.ConeGeometry(1, 1, 32, 1, true);
+    private visibilityTargets: VisibilityTarget[] = [];
+    private visibilityTargetById: Map<string, VisibilityTarget> = new Map();
+    private activeVisibilityLinks: Map<string, { targetId: string; elevationDeg: number; distanceSq: number }> = new Map();
+    private lastVisibilityTargetSignature: string = '';
+    private lastVisibilityRefreshMs: number = 0;
+    private visibilityConeFrame: number = 0;
+    private scratchVecA: THREE.Vector3 = new THREE.Vector3();
+    private scratchVecB: THREE.Vector3 = new THREE.Vector3();
+    private scratchVecC: THREE.Vector3 = new THREE.Vector3();
+
+    private static readonly MAX_ACTIVE_VISIBILITY_CONES = 512;
+    private static readonly VISIBILITY_REFRESH_MS = 250;
+    private static readonly MAX_VISIBILITY_DISTANCE_KM = 15000;
+    private static readonly VISIBILITY_CONE_HALF_ANGLE_RAD = 8 * Math.PI / 180;
 
     constructor(container: HTMLElement) {
         this.container = container;
@@ -90,32 +117,32 @@ export class SatelliteSimulation {
         this.groundStationLayer.updateStations(gs);
     }
 
-    initSatellites(satellites: SimulatedSatellite[]): void {
+    initSatellites(satelliteCount: number): void {
         if (this.instancedMesh) {
             this.instancedMesh.destroy();
         }
-        this.instancedMesh = new SatelliteInstancedMesh(this.scene, satellites.length);
+        this.instancedMesh = new SatelliteInstancedMesh(this.scene, satelliteCount);
     }
 
-    updateSatellites(satellites: SimulatedSatellite[]): void {
+    updateSatellites(satellites: Map<string, SimulatedSatellite>): void {
         const state = simulationStore.getState();
         const hoveredId = state.hoveredSatelliteId;
         const selectedId = state.selectedSatelliteId;
 
         if (!this.instancedMesh) {
-            if (satellites.length > 0) {
-                this.initSatellites(satellites);
+            if (satellites.size > 0) {
+                this.initSatellites(satellites.size);
             }
             return;
         }
 
-        if (this.instancedMesh && satellites.length > 0) {
+        if (this.instancedMesh && satellites.size > 0) {
             const activeOrbitIds = new Set<string>();
             if (selectedId) activeOrbitIds.add(selectedId);
             if (hoveredId) activeOrbitIds.add(hoveredId);
 
             activeOrbitIds.forEach(id => {
-                const pathSat = satellites.find(s => s.id === id);
+                const pathSat = satellites.get(id);
                 if (pathSat && pathSat.orbitPath && pathSat.orbitPath.length > 0) {
                     this.updateOrbitPath(pathSat);
                 }
@@ -361,10 +388,7 @@ export class SatelliteSimulation {
         const index = firstSat.index;
 
         if (index !== undefined && mesh.category) {
-            const state = simulationStore.getState();
-            const satellites = Array.from(state.satellites.values()) as SimulatedSatellite[];
-            const catSats = satellites.filter(s => s.category.toLowerCase() === mesh.category);
-            const id = catSats[index]?.id;
+            const id = this.instancedMesh.getSatelliteId(mesh.category, index);
             if (id) return { id, distance: firstSat.distance };
         }
         return null;
@@ -543,39 +567,7 @@ export class SatelliteSimulation {
     private updateSimulationLayers(state: any, satPositions: Map<string, THREE.Vector3>) {
         const groundStations = state.groundStations;
 
-        if (state.showVisibilityCones) {
-            state.satellites.forEach((sat: SimulatedSatellite) => {
-                const id = sat.id;
-                let cone = this.visibilityCones.get(id);
-                const pos = satPositions.get(id);
-                if (!pos) return;
-
-                if (!cone) {
-                    const geometry = new THREE.ConeGeometry(1, 1, 32, 1, true);
-                    const material = new THREE.MeshBasicMaterial({
-                        color: getSatelliteColor(sat.category, id),
-                        transparent: true,
-                        opacity: 0.15,
-                        side: THREE.DoubleSide,
-                        depthWrite: false
-                    });
-                    cone = new THREE.Mesh(geometry, material);
-                    this.visibilityCones.set(id, cone);
-                    this.scene.add(cone);
-                }
-                cone.visible = true;
-                const height = pos.length() - 6371;
-                const dir = pos.clone().normalize();
-                const centerPos = dir.clone().multiplyScalar(6371 + height / 2);
-                cone.position.copy(centerPos);
-                const halfAngle = 45 * Math.PI / 180;
-                const baseRadius = height * Math.tan(halfAngle);
-                cone.scale.set(baseRadius, height, baseRadius);
-                cone.quaternion.setFromUnitVectors(SatelliteSimulation.UP_VEC, dir);
-            });
-        } else {
-            this.visibilityCones.forEach(c => c.visible = false);
-        }
+        this.updateTargetedVisibilityCones(state, satPositions);
 
         if (state.showGSNCoverage) {
             groundStations.forEach((gs: any) => {
@@ -603,10 +595,193 @@ export class SatelliteSimulation {
         }
     }
 
+    private updateTargetedVisibilityCones(state: any, satPositions: Map<string, THREE.Vector3>): void {
+        if (!state.showVisibilityCones) {
+            this.activeVisibilityLinks.clear();
+            this.visibilityCones.forEach(cone => { cone.visible = false; });
+            return;
+        }
+
+        this.syncVisibilityTargets(state.groundStations || []);
+        this.refreshActiveVisibilityLinks(state.satellites, satPositions);
+
+        this.visibilityConeFrame++;
+
+        this.activeVisibilityLinks.forEach((link, satId) => {
+            const sat = state.satellites.get(satId) as SimulatedSatellite | undefined;
+            const satPos = satPositions.get(satId);
+            const target = this.visibilityTargetById.get(link.targetId);
+            if (!sat || !satPos || !target) return;
+
+            let cone = this.visibilityCones.get(satId);
+            if (!cone) {
+                cone = this.createVisibilityCone(sat);
+                this.visibilityCones.set(satId, cone);
+                this.scene.add(cone);
+            }
+
+            const directionToTarget = this.scratchVecA.copy(target.position).sub(satPos);
+            const height = directionToTarget.length();
+            if (height <= 0.001) {
+                cone.visible = false;
+                return;
+            }
+
+            directionToTarget.multiplyScalar(1 / height);
+            const center = this.scratchVecB.copy(satPos).addScaledVector(directionToTarget, height / 2);
+            const apexDirection = this.scratchVecC.copy(directionToTarget).multiplyScalar(-1);
+            const baseRadius = Math.max(
+                target.radiusKm,
+                Math.min(1200, height * Math.tan(SatelliteSimulation.VISIBILITY_CONE_HALF_ANGLE_RAD))
+            );
+
+            cone.position.copy(center);
+            cone.quaternion.setFromUnitVectors(SatelliteSimulation.UP_VEC, apexDirection);
+            cone.scale.set(baseRadius, height, baseRadius);
+            cone.visible = true;
+            cone.userData.activeFrame = this.visibilityConeFrame;
+
+            const material = cone.material as THREE.MeshBasicMaterial;
+            material.color.copy(getSatelliteColor(sat.category, sat.id));
+            material.opacity = sat.isSelected || sat.isHovered ? 0.32 : 0.18;
+        });
+
+        this.visibilityCones.forEach(cone => {
+            if (cone.userData.activeFrame !== this.visibilityConeFrame) {
+                cone.visible = false;
+            }
+        });
+    }
+
+    private createVisibilityCone(sat: SimulatedSatellite): THREE.Mesh {
+        const material = new THREE.MeshBasicMaterial({
+            color: getSatelliteColor(sat.category, sat.id),
+            transparent: true,
+            opacity: 0.18,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        const cone = new THREE.Mesh(this.visibilityConeGeometry, material);
+        cone.renderOrder = 4;
+        cone.name = `visibility-cone-${sat.id}`;
+        return cone;
+    }
+
+    private syncVisibilityTargets(groundStations: any[]): void {
+        const signature = groundStations
+            .map(gs => `${gs.id}:${gs.lat}:${gs.lon}:${gs.minElevation ?? 10}`)
+            .join('|');
+
+        if (signature === this.lastVisibilityTargetSignature) return;
+        this.lastVisibilityTargetSignature = signature;
+        this.visibilityTargets = [];
+        this.visibilityTargetById.clear();
+
+        groundStations.forEach(gs => {
+            const position = latLonToVector3(gs.lat, gs.lon, 0);
+            const target: VisibilityTarget = {
+                id: `gs:${gs.id}`,
+                kind: 'ground-station',
+                label: gs.name,
+                position,
+                normal: position.clone().normalize(),
+                radiusKm: 350,
+                minElevationDeg: gs.minElevation ?? 10
+            };
+            this.visibilityTargets.push(target);
+            this.visibilityTargetById.set(target.id, target);
+        });
+    }
+
+    private refreshActiveVisibilityLinks(
+        satellites: Map<string, SimulatedSatellite>,
+        satPositions: Map<string, THREE.Vector3>
+    ): void {
+        const now = performance.now();
+        if (now - this.lastVisibilityRefreshMs < SatelliteSimulation.VISIBILITY_REFRESH_MS) return;
+        this.lastVisibilityRefreshMs = now;
+        this.activeVisibilityLinks.clear();
+
+        if (this.visibilityTargets.length === 0 || satellites.size === 0) return;
+
+        const maxDistanceSq = SatelliteSimulation.MAX_VISIBILITY_DISTANCE_KM ** 2;
+        const candidates: { satId: string; targetId: string; elevationDeg: number; distanceSq: number }[] = [];
+
+        satellites.forEach((sat, satId) => {
+            const satPos = satPositions.get(satId);
+            if (!satPos) return;
+
+            let bestTarget: VisibilityTarget | null = null;
+            let bestElevation = -90;
+            let bestDistanceSq = Infinity;
+
+            for (const target of this.visibilityTargets) {
+                const distanceSq = target.position.distanceToSquared(satPos);
+                if (distanceSq > maxDistanceSq) continue;
+
+                const range = this.scratchVecA.copy(satPos).sub(target.position);
+                const rangeLength = range.length();
+                if (rangeLength <= 0.001) continue;
+
+                const elevationDeg = Math.asin(
+                    Math.max(-1, Math.min(1, range.multiplyScalar(1 / rangeLength).dot(target.normal)))
+                ) * 180 / Math.PI;
+
+                if (elevationDeg >= target.minElevationDeg && elevationDeg > bestElevation) {
+                    bestTarget = target;
+                    bestElevation = elevationDeg;
+                    bestDistanceSq = distanceSq;
+                }
+            }
+
+            if (bestTarget) {
+                candidates.push({
+                    satId,
+                    targetId: bestTarget.id,
+                    elevationDeg: bestElevation,
+                    distanceSq: bestDistanceSq
+                });
+            }
+        });
+
+        if (candidates.length > SatelliteSimulation.MAX_ACTIVE_VISIBILITY_CONES) {
+            candidates.sort((a, b) => b.elevationDeg - a.elevationDeg || a.distanceSq - b.distanceSq);
+            candidates.length = SatelliteSimulation.MAX_ACTIVE_VISIBILITY_CONES;
+        }
+
+        candidates.forEach(candidate => {
+            this.activeVisibilityLinks.set(candidate.satId, {
+                targetId: candidate.targetId,
+                elevationDeg: candidate.elevationDeg,
+                distanceSq: candidate.distanceSq
+            });
+        });
+    }
+
     destroy(): void {
         window.removeEventListener('resize', this.boundResize);
         this.renderer.domElement.removeEventListener('click', this.boundClick);
         this.renderer.domElement.removeEventListener('mousemove', this.boundMouseMove);
+        this.cameraTween?.kill();
+        this.targetTween?.kill();
+        this.groundStationLayer?.destroy();
+        this.instancedMesh?.destroy();
+        this.orbitPathLines.forEach(line => {
+            this.scene.remove(line);
+            line.geometry.dispose();
+            (line.material as THREE.Material).dispose();
+        });
+        this.visibilityCones.forEach(cone => {
+            this.scene.remove(cone);
+            (cone.material as THREE.Material).dispose();
+        });
+        this.gsCoverageMeshes.forEach(mesh => {
+            this.scene.remove(mesh);
+            mesh.geometry.dispose();
+            (mesh.material as THREE.Material).dispose();
+        });
+        this.visibilityConeGeometry.dispose();
         this.renderer.dispose();
         this.renderer.domElement.remove();
     }

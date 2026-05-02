@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { TleLoader } from '../services/TleLoader';
 import { OrbitPropagator } from '../services/OrbitPropagator';
 import { KeplerPropagator } from '../services/KeplerPropagator';
@@ -6,7 +5,7 @@ import {
     SimulationState, TleData, GroundStation, DEFAULT_GROUND_STATIONS, SimulatedSatellite,
     KeplerParams, PredictedPass, DashboardType
 } from '../modules/types';
-import { latLonToVector3, calculateElevation } from '../utils/coordUtils';
+import { calculateElevation } from '../utils/coordUtils';
 
 class SimulationStore {
     private state: SimulationState = {
@@ -190,24 +189,35 @@ class SimulationStore {
         const dtSeconds = (dtMs / 1000) * this.state.speed;
         const nextTimeMs = this.state.simulationTime.getTime() + dtSeconds * 1000;
 
-        // Find global simulation boundaries
-        let minStart = Infinity;
-        let maxEnd = -Infinity;
+        let minStart: number | null = null;
+        let maxFiniteEnd: number | null = null;
+        let hasOpenEndedOrbit = false;
 
         this.state.satellites.forEach(sat => {
-            if (sat.orbitStartTime) minStart = Math.min(minStart, sat.orbitStartTime);
-            if (sat.orbitEndTime) maxEnd = Math.max(maxEnd, sat.orbitEndTime);
+            if (Number.isFinite(sat.orbitStartTime)) {
+                minStart = minStart === null ? sat.orbitStartTime : Math.min(minStart, sat.orbitStartTime);
+            }
+
+            if (typeof sat.orbitEndTime === 'number' && Number.isFinite(sat.orbitEndTime)) {
+                maxFiniteEnd = maxFiniteEnd === null ? sat.orbitEndTime : Math.max(maxFiniteEnd, sat.orbitEndTime);
+            } else {
+                hasOpenEndedOrbit = true;
+            }
         });
 
-        // Clamp and auto-pause at boundaries
         if (this.state.speed > 0) {
-            if (this.state.dashboardType === 'simulation' && nextTimeMs >= maxEnd) {
+            if (
+                this.state.dashboardType === 'simulation' &&
+                !hasOpenEndedOrbit &&
+                maxFiniteEnd !== null &&
+                nextTimeMs >= maxFiniteEnd
+            ) {
                 this.state.isPlaying = false;
                 this.state.speed = 0;
-                return new Date(maxEnd);
+                return new Date(maxFiniteEnd);
             }
         } else if (this.state.speed < 0) {
-            if (nextTimeMs <= minStart) {
+            if (minStart !== null && nextTimeMs <= minStart) {
                 this.state.isPlaying = false;
                 this.state.speed = 0;
                 return new Date(minStart);

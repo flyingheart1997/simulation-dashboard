@@ -65,9 +65,8 @@ export class SimulationManager {
             lastTime = now;
 
             simulationStore.update(dt);
-            const sats = Array.from(simulationStore.getState().satellites.values());
             if (this.simulation) {
-                this.simulation.updateSatellites(sats);
+                this.simulation.updateSatellites(simulationStore.getState().satellites);
                 this.simulation.tick();
             }
 
