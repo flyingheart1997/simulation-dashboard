@@ -1,5 +1,5 @@
 import * as satellite from 'satellite.js';
-import { SatellitePosition } from '../modules/types';
+import { SatellitePosition } from '../types/types';
 
 export class OrbitPropagator {
     private satrec: satellite.SatRec;

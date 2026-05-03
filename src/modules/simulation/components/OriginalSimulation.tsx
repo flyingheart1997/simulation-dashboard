@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { KeplerParams, ManualGroundStation, DashboardType } from '../modules/types';
+import { KeplerParams, ManualGroundStation, DashboardType } from '../types/types';
 import { simulationView } from './SimulationManager';
 import { simulationStore } from '../stores/simulationStore';
 

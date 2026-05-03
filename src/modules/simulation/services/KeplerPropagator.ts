@@ -1,5 +1,5 @@
 import { KeplerPhysicsPropagator as PhysicsPropagator } from './physics/KeplerPhysics';
-import { SatellitePosition } from '../modules/types';
+import { SatellitePosition } from '../types/types';
 
 export class KeplerPropagator {
     private propagator: PhysicsPropagator;

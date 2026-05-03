@@ -1,176 +1,148 @@
-# Future Map Rendering Upgrade
+# Map Rendering Architecture
 
-This document records the intended long-term solution for high-quality 2D map rendering and future map design upgrades. Use this when the request is to "upgrade map design" or to fix zoom clarity beyond the current local texture approach.
+This document records the current map rendering design and the next safe upgrade path. Use it whenever the request is to improve map visual quality, tile performance, offline maps, or 2D/3D map consistency.
 
-## Current State
+## Goals
 
-The renderer now supports a MapLibre 2D base map with the existing local texture renderer as the automatic fallback. This keeps current simulation functionality intact while allowing crisp online/offline map sources. The 3D globe still uses the local equirectangular textures, because a fully tiled 3D globe requires a separate quadtree/LOD renderer.
+- Keep 2D and 3D visual styles consistent.
+- Support both online and offline deployments.
+- Keep pan, zoom, simulation playback, hover, selection, coverage, links, and AOI editing aligned and responsive.
+- Avoid stretching map imagery in the wrong projection.
+- Keep only two public map presets: `dark` and `light`.
 
-The current map styles are intentionally limited to:
+`light` is the public prop name for the satellite-style map. Internally the simulation still uses the existing `satellite` map type in a few store paths.
 
-- `dark`: local tactical/dim map texture.
-- `satellite`: local brighter Earth texture.
+## Public Configuration
 
-Mapbox must use a browser-safe public token only:
+`OriginalSimulation` controls the map through these props:
 
-```bash
-NEXT_PUBLIC_MAPBOX_TOKEN=...
+```tsx
+<OriginalSimulation
+    onlineMap={true}
+    editMode={false}
+    mapType="light"
+    viewType="3D"
+/>
 ```
 
-Never commit `.env.local` or a Mapbox secret token.
+| Prop | Meaning |
+| --- | --- |
+| `onlineMap` | `true` uses Mapbox/MapLibre tile sources. `false` uses bundled local textures. |
+| `editMode` | Starts a 2D create/edit workspace. Edit mode forces the dark editing map and disables inspect-only overlays. |
+| `mapType` | Public map preset: `dark` or `light`. |
+| `viewType` | Initial view: `2D` or `3D`. Edit mode always starts in 2D. |
 
-## Why The Previous Tile Attempt Failed
+## Online Rendering
 
-Mapbox and MapLibre web tiles are normally WebMercator tiles. The earlier attempt placed those tiles onto an equirectangular flat map plane. That caused a projection mismatch:
+Online mode uses projection-native tile rendering in both views.
 
-- Map labels and landmasses warped or stretched.
-- Tile quality looked broken at zoom.
-- 2D satellite, ground station, orbit, and coverage overlays risked geographic misalignment.
-- 2D and 3D map design consistency became harder to reason about.
+2D:
 
-The issue was not only tile quality or token configuration. The deeper issue was rendering WebMercator tiles in the wrong coordinate system.
+- `MapLibreBaseLayer` owns the base map.
+- MapLibre handles tile loading, projection, labels, pan, zoom, high-DPI tile selection, and style JSON behavior.
+- `FlatMapLayer` renders satellites, ground stations, ground targets, AOIs, paths, coverage, and links as a synchronized Three.js overlay.
+- Overlay coordinates are projected from geographic coordinates through the active MapLibre transform.
 
-## Recommended Long-Term Architecture
+3D:
 
-Use MapLibre GL as the native 2D base map renderer, with a transparent Three.js overlay for simulation entities.
+- `TiledGlobeLayer` renders online raster tiles onto globe segments.
+- The globe tile layer is clipped by the actual globe surface, so back-side entities are not visible through Earth.
+- `EarthScene` keeps day/night and environmental data layers separate from the base tile renderer.
 
-Layer order:
+Supported online sources:
 
-1. MapLibre canvas for the 2D base map.
-2. Transparent Three.js or canvas overlay for satellites, ground stations, ground targets, polygons, orbit paths, coverage areas, and communication links.
-3. Existing dashboard and controls.
+- `NEXT_PUBLIC_MAPLIBRE_DARK_STYLE_URL`
+- `NEXT_PUBLIC_MAPLIBRE_SATELLITE_STYLE_URL`
+- `NEXT_PUBLIC_MAPBOX_TOKEN` as the hosted Mapbox fallback source
 
-MapLibre should own:
+Only browser-safe public Mapbox tokens should use the `NEXT_PUBLIC_` prefix. Never commit `.env.local`.
 
-- Base map tile loading.
-- WebMercator projection.
-- Pan and zoom inertia.
-- Retina/high-DPI tile selection.
-- Vector labels and symbol placement.
-- Tile cache and network scheduling.
-- Style JSON support.
+## Offline Rendering
 
-The simulation overlay should own:
+Offline mode uses local equirectangular textures from `public/textures` in both 2D and 3D.
 
-- Satellite icons and hover/select behavior.
-- Ground station and ground target markers.
-- Orbit paths.
-- Coverage footprints.
-- Communication links.
-- Create/edit interactions for ground stations, ground targets, and polygons.
+Expected texture roles:
 
-## Projection Strategy
+- `earth-dark.png`: dark day-side base map.
+- `earth-light.jpg`: light day-side base map.
+- `earth-night.jpg`: night-side city-lights/low-light base map.
 
-Do not manually stretch WebMercator tiles onto a Three.js equirectangular plane.
+Offline day/night behavior:
 
-For 2D mode:
+- Day side uses the selected `dark` or `light` texture.
+- Night side blends to `earth-night.jpg` with a smooth sun terminator.
+- Offline light mode does not receive an extra day-side dark tint.
+- Offline dark mode keeps its tactical color grading on the day side only.
+
+This means the old "black overlay over the whole map" approach should not be reintroduced for offline light maps.
+
+## Projection Rules
+
+Do not manually stretch WebMercator tiles onto a Three.js equirectangular plane. That was the root cause of earlier blurry, warped, and misaligned map attempts.
+
+For 2D MapLibre mode:
 
 - Use MapLibre's own camera and projection.
-- Convert each simulation latitude/longitude into screen coordinates with `map.project([lon, lat])`.
-- Render overlay objects in screen-space or in a synchronized orthographic overlay.
-- Split orbit and coverage line segments at the antimeridian before projection.
-- Reproject overlay geometry on `move`, `zoom`, `resize`, and simulation ticks.
+- Convert every simulation lat/lon to screen coordinates through the map projection bridge.
+- Reproject overlay geometry on map `move`, `zoom`, `resize`, and simulation ticks.
+- Split paths at the antimeridian when needed so lines do not cross the whole screen.
 
 For map clicks:
 
-- Use MapLibre's click event to get exact `lngLat`.
-- For create ground station/target, store one `{ lat, lon }`.
-- For polygon drawing, append each clicked `{ lat, lon }` to the active polygon.
-- For overlay entity picking, check satellite/ground station hit targets first, then fall back to map click behavior.
+- MapLibre click/pointer events provide exact `lngLat`.
+- Ground station and ground target creation stores one `{ lat, lon }`.
+- AOI creation stores a unique point list and requires at least three points before commit.
+- Entity picking should test simulation overlays first, then fall back to map creation behavior.
 
-## Online And Offline Sources
+## Edit Mode Rules
 
-The application must work online and offline. The recommended source strategy is:
+Edit mode is intentionally a clean scratchpad.
 
-Online:
+- Force the dark map style for editing clarity.
+- Disable day/night layers and environmental overlays.
+- Hide inspect-only data such as satellite coverage, GSN coverage, comm links, and unrelated objects.
+- For create mode, show only the active draft object.
+- For edit mode, show only the object being edited.
+- AOI vertices are visible only while creating or editing AOIs in 2D. Inspect mode shows AOI fill and outline without vertex handles.
+- Switching to 3D exits create/edit mode and discards invalid AOI drafts with fewer than three unique points.
 
-- Mapbox public token through `NEXT_PUBLIC_MAPBOX_TOKEN`, or another MapLibre-compatible hosted style.
-- Dark style: vector style is preferred for crisp labels and borders.
-- Satellite style: raster imagery with optional vector label overlay.
+## Performance Rules
 
-Offline:
-
-- Prefer PMTiles for local/offline maps.
-- Provide MapLibre style JSON files and reference them through:
-  - `NEXT_PUBLIC_MAPLIBRE_DARK_STYLE_URL=/maps/dark-style.json`
-  - `NEXT_PUBLIC_MAPLIBRE_SATELLITE_STYLE_URL=/maps/satellite-style.json`
-- Those style JSON files can reference PMTiles, for example:
-  - `pmtiles:///maps/dark.pmtiles`
-  - `pmtiles:///maps/satellite.pmtiles`
-- Use `pmtiles` protocol integration with MapLibre.
-- Fall back to local equirectangular textures only if tile/style initialization fails.
-
-Why PMTiles:
-
-- Single-file distribution is easier than millions of `{z}/{x}/{y}` files.
-- Good browser caching behavior.
-- Works locally and can also be served from a CDN.
-- Supports range requests when hosted properly.
-
-## 2D Implementation Plan
-
-1. Add a MapLibre container below the current simulation overlay. Done.
-2. Initialize MapLibre only in 2D mode, or keep it hidden while in 3D mode. Done.
-3. Define two style configs: `dark` and `satellite`. Done.
-4. Add a source resolver:
-   - If a MapLibre style URL is configured, use that first. Done.
-   - Else if a public Mapbox token exists, use Mapbox raster styles. Done.
-   - If all tile sources fail, fall back to local texture renderer. Done.
-5. Move 2D base map pan/zoom responsibility to MapLibre. Done for MapLibre-active mode.
-6. Replace current 2D map plane picking with MapLibre `lngLat` events. Done for MapLibre-active mode.
-7. Keep overlay picking for satellites, ground stations, and targets. Done.
-8. Reproject overlay geometry with `map.project`. Done.
-9. Throttle expensive overlay reprojection during fast map movement. Pending if profiling shows need.
-10. Preserve existing 3D behavior and state transitions. Done.
-
-## Overlay Performance Rules
-
-Use these rules to keep the upgraded map smooth:
-
-- Reproject visible overlay points only.
-- Reuse geometry buffers instead of recreating them every event.
-- Use `requestAnimationFrame` batching for `move` and `zoom` events.
-- Keep orbit paths simplified based on zoom level.
-- Cache projected orbit segments until the map camera or simulation time changes enough to invalidate them.
-- Use hit-test buffers for icons instead of large DOM marker sets.
-- Keep coverage footprint recalculation throttled; projection can update more often than geodesic recomputation.
-
-## 3D Globe Strategy
-
-Do not block the 2D upgrade on perfect 3D tile parity.
-
-Short-term:
-
-- Keep the current local equirectangular texture on the 3D globe.
-- Use the same style names (`dark`, `satellite`) and similar color treatment.
-
-Long-term:
-
-- Implement a globe tile LOD renderer only if deep 3D surface inspection becomes a requirement.
-- This requires a quadtree/LOD sphere renderer and is a separate larger phase.
+- Keep MapLibre responsible for tile movement and inertia.
+- Reuse Three.js materials and geometry buffers where practical.
+- Keep overlay reprojection tied to a map transform revision so coverage, links, and icons stay aligned during pan/zoom.
+- Recompute expensive geodesic coverage and communication geometry less often than cheap screen-space reprojection.
+- Batch satellite rendering instead of creating one independent mesh per satellite.
+- Avoid DOM markers for large entity sets; use WebGL overlays and compact hit-test buffers.
+- Do not rebuild all orbit/coverage geometry on every pointer event.
 
 ## Visual Acceptance Criteria
 
-The upgrade is acceptable only if:
+The map renderer is acceptable only if:
 
-- 2D zoom stays crisp and does not stretch a single image.
-- Pan and zoom feel smooth on normal laptop hardware.
-- Dark and satellite styles are visibly different.
-- Day/night layer remains visible and does not destroy map readability.
-- Satellites, ground stations, targets, orbits, coverage, and links stay aligned with the map at all zoom levels.
-- Create/edit clicks return accurate lat/lon values.
-- Offline mode still provides a usable map.
-- Switching 2D to 3D and 3D to 2D preserves selected/hovered state correctly.
+- 2D and 3D use matching dark/light visual intent.
+- Online 2D zoom remains crisp and projection-correct.
+- Online 3D globe shows actual map tiles, not a transparent or textureless globe.
+- Offline 2D and 3D remain usable without network access.
+- Day/night is clearly visible when enabled and absent in edit mode.
+- Satellites, ground stations, AOIs, coverage, and links stay aligned during pan, zoom, drag, and simulation playback.
+- Hover and tooltip placement stay inside the viewport.
+- Performance remains smooth on lower-end devices.
 
-## Anti-Patterns To Avoid
+## Future Upgrade Path
 
-- Do not render WebMercator tiles on an equirectangular plane.
-- Do not use a single large image as the final zoom solution.
-- Do not rebuild all overlay geometry on every mouse event.
-- Do not mix map projections inside the same 2D overlay path.
-- Do not reintroduce Mapbox token code unless the renderer is projection-native.
-- Do not make Mapbox the only path; offline support is required.
+For a future offline tile upgrade, prefer PMTiles:
 
-## Trigger Phrase
+- Store offline dark and satellite tiles as single `.pmtiles` files.
+- Serve local MapLibre style JSON files from `public/maps`.
+- Register the PMTiles protocol with MapLibre.
+- Keep local equirectangular textures as the final fallback.
 
-When future work says "upgrade map design", use this document as the implementation blueprint.
+For deeper 3D zoom quality, improve `TiledGlobeLayer` with:
+
+- Adaptive quadtree LOD.
+- Tile cache eviction by camera distance and screen size.
+- Frustum and horizon culling.
+- Optional normal/height detail only after profiling shows enough GPU budget.
+
+Do not add these future upgrades unless the existing 2D/3D behavior and edit workflows are covered by manual testing.

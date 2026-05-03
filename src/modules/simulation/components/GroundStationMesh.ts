@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GroundStation, SimulatedSatellite } from '../modules/types';
+import { GroundStation, SimulatedSatellite } from '../types/types';
 import { simulationStore } from '../stores/simulationStore';
 import { latLonToVector3 } from '../utils/coordUtils';
 import { findBestVisibleSatellite } from '../utils/visibilityUtils';
@@ -52,12 +52,12 @@ function createModernGSIconTexture(): THREE.Texture {
     // ── Radar Dish Silhouette ───────────────────────────────────
     ctx.save();
     ctx.translate(centerX, centerY);
-    
+
     // Dish Base (Static)
     ctx.fillStyle = '#00ff88';
     ctx.shadowBlur = 20;
     ctx.shadowColor = '#00ff88';
-    
+
     // Main Dish Curve
     ctx.beginPath();
     ctx.arc(0, -20, 80, Math.PI * 0.1, Math.PI * 0.9);
@@ -109,7 +109,7 @@ export class GroundStationLayer {
     private groundStations: GroundStation[] = [];
     private iconMeshes: Map<string, THREE.Mesh> = new Map();
     private commLines: Map<string, THREE.Line> = new Map();
-    
+
     private cachedTexture: THREE.Texture | null = null;
     private cachedGeometry: THREE.CircleGeometry | null = null;
 
@@ -145,7 +145,7 @@ export class GroundStationLayer {
         const material = new THREE.MeshBasicMaterial({
             map: this.cachedTexture,
             transparent: true,
-            depthWrite: false, 
+            depthWrite: false,
             depthTest: true,
             side: THREE.DoubleSide,
             blending: THREE.AdditiveBlending,
@@ -155,23 +155,23 @@ export class GroundStationLayer {
         const mesh = new THREE.Mesh(this.cachedGeometry!, material);
         mesh.userData = { gsId: gs.id };
         mesh.renderOrder = 200; // Highest priority for surface features
-        
+
         const pos = latLonToVector3(gs.lat, gs.lon, GroundStationLayer.ICON_ALTITUDE);
         mesh.position.copy(pos);
-        
+
         // Orient flat to surface normal
         const normal = pos.clone().normalize();
         mesh.lookAt(pos.clone().add(normal));
 
         // Set initial scale
         mesh.scale.set(GroundStationLayer.ICON_BASE_UNIT, GroundStationLayer.ICON_BASE_UNIT, 1);
-        
+
         return mesh;
     }
 
     updateStations(stations: GroundStation[]): void {
         this.groundStations = stations;
-        
+
         // Remove stale meshes
         const stationIds = new Set(stations.map(s => s.id));
         this.iconMeshes.forEach((mesh, id) => {
@@ -215,7 +215,7 @@ export class GroundStationLayer {
         // Update scaling for selected state (Unified size for both cases)
         this.iconMeshes.forEach((mesh) => {
             const targetSize = GroundStationLayer.ICON_BASE_UNIT;
-            
+
             if (mesh.scale.x !== targetSize) {
                 mesh.scale.set(targetSize, targetSize, 1);
             }
@@ -229,7 +229,7 @@ export class GroundStationLayer {
             // Find the first hit that isn't occluded by Earth
             // Sort hits by distance
             hits.sort((a, b) => a.distance - b.distance);
-            
+
             for (const hit of hits) {
                 // Occlusion Check: Does Earth block this Ground Station?
                 // Look for the Earth specifically using the group property
@@ -252,36 +252,36 @@ export class GroundStationLayer {
             this.commLines.forEach(line => line.visible = false);
             return;
         }
- 
+
         const satelliteMap = state.satellites as Map<string, SimulatedSatellite>;
         if (!satelliteMap || satelliteMap.size === 0) {
             this.commLines.forEach(line => line.visible = false); // Hide all lines if no satellites
             return;
         }
- 
+
         const selectedGsId = state.selectedGroundStationId as string | null;
         const selectedSatId = state.selectedSatelliteId as string | null;
         const activeGsIds = new Set<string>();
         const satellites = Array.from(satelliteMap.values());
- 
+
         for (const gs of this.groundStations) {
             // Comm lines start from surface height (35km for visibility)
             const gsPos = latLonToVector3(gs.lat, gs.lon, 35);
             const bestLink = findBestVisibleSatellite(gs, satellites);
             const bestSatPos = bestLink ? satPositions?.get(bestLink.satellite.id) : null;
- 
+
             if (bestSatPos) {
                 const satPos = bestSatPos;
                 activeGsIds.add(gs.id);
                 const isSelected = gs.id === selectedGsId || bestLink?.satellite.id === selectedSatId;
- 
+
                 let line = this.commLines.get(gs.id);
-                
+
                 const earthRadius = GroundStationLayer.RADIUS;
                 const mid = gsPos.clone().lerp(satPos, 0.5).normalize().multiplyScalar(earthRadius + 1500);
                 const curve = new THREE.QuadraticBezierCurve3(gsPos, mid, satPos);
                 const points = curve.getPoints(12);
- 
+
                 if (!line) {
                     const geo = new THREE.BufferGeometry().setFromPoints(points);
                     const mat = new THREE.LineBasicMaterial({
@@ -303,7 +303,7 @@ export class GroundStationLayer {
                 }
             }
         }
- 
+
         this.commLines.forEach((line, gsId) => {
             if (!activeGsIds.has(gsId)) {
                 line.visible = false;
@@ -317,13 +317,13 @@ export class GroundStationLayer {
             line.geometry.dispose();
             (line.material as THREE.Material).dispose();
         });
-        
+
         this.iconMeshes.forEach(mesh => {
             this.iconGroup.remove(mesh);
             mesh.geometry.dispose();
             (mesh.material as THREE.Material).dispose();
         });
-        
+
         if (this.cachedTexture) this.cachedTexture.dispose();
         if (this.cachedGeometry) this.cachedGeometry.dispose();
         this.scene.remove(this.iconGroup);

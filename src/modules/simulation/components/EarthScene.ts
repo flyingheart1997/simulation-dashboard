@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { MapType } from '../modules/types';
+import type { MapType } from '../types/types';
 import {
     getSimulationMapStyle,
     SIMULATION_DATA_LAYER_STYLES,
