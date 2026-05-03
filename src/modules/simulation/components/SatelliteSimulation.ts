@@ -5,6 +5,7 @@ import { EarthScene } from './EarthScene';
 import { SatelliteInstancedMesh } from './SatelliteInstancedMesh';
 import { GroundStationLayer } from './GroundStationMesh';
 import { FlatMapLayer } from './FlatMapLayer';
+import { MapLibreBaseLayer } from './MapLibreBaseLayer';
 import type { EditablePolygon, SimulatedSatellite } from '../modules/types';
 import { simulationStore } from '../stores/simulationStore';
 import { getSunPosition } from '../utils/sunUtils';
@@ -44,6 +45,8 @@ export class SatelliteSimulation {
     private controls: OrbitControls;
     private earth: EarthScene;
     private flatMap: FlatMapLayer;
+    private mapLibreBase: MapLibreBaseLayer;
+    private spaceBackground: THREE.Texture | THREE.CubeTexture | THREE.Color | null = null;
     private instancedMesh: SatelliteInstancedMesh | null = null;
     private raycaster: THREE.Raycaster = new THREE.Raycaster();
     private mouse: THREE.Vector2 = new THREE.Vector2();
@@ -88,7 +91,11 @@ export class SatelliteSimulation {
     private static readonly VISIBILITY_REFRESH_MS = 250;
     private static readonly MAX_FLAT_ZOOM = 6;
 
-    constructor(container: HTMLElement) {
+    constructor(
+        container: HTMLElement,
+        private readonly onlineMapEnabled: boolean,
+        private readonly editModeEnabled: boolean
+    ) {
         this.container = container;
         this.scene = new THREE.Scene();
 
@@ -133,11 +140,13 @@ export class SatelliteSimulation {
         this.sunLight.position.set(5, 3, 5).normalize();
         this.scene.add(this.sunLight);
 
-        this.earth = new EarthScene(this.scene);
+        this.earth = new EarthScene(this.scene, onlineMapEnabled);
+        this.spaceBackground = this.scene.background as THREE.Texture | THREE.CubeTexture | THREE.Color | null;
         const earthGroup = this.earth.getGroup();
         earthGroup.name = 'earth';
         this.scene.add(earthGroup);
         this.flatMap = new FlatMapLayer(this.scene, flatBounds);
+        this.mapLibreBase = new MapLibreBaseLayer(container, onlineMapEnabled);
 
         this.boundResize = this.onResize.bind(this);
         this.boundClick = this.onClick.bind(this);
@@ -358,7 +367,7 @@ export class SatelliteSimulation {
         this.updateRaycaster(event);
         const state = simulationStore.getState();
         if (state.workspaceMode !== 'inspect' && state.workspaceMode !== 'draw-polygon') {
-            const latLon = this.flatMap.pickMapLatLon(this.raycaster);
+            const latLon = this.getFlatLatLonFromEvent(event);
             const target = this.pickEditableFlatTarget();
             if (latLon && target) {
                 this.editableDragTarget = { ...target, lastLatLon: latLon, moved: false };
@@ -387,6 +396,10 @@ export class SatelliteSimulation {
     private onWheel(event: WheelEvent): void {
         if (simulationStore.getState().viewMode !== '2d') return;
         event.preventDefault();
+        if (this.mapLibreBase.isActive()) {
+            this.mapLibreBase.zoomByWheel(event);
+            return;
+        }
         const before = this.getFlatWorldPointFromEvent(event);
         const clampedDelta = Math.max(-240, Math.min(240, event.deltaY));
         const zoomFactor = Math.exp(-clampedDelta * 0.0012);
@@ -416,6 +429,14 @@ export class SatelliteSimulation {
             this.flatCamera.position.y + ndcY * visibleHeight * 0.5,
             0
         );
+    }
+
+    private getFlatLatLonFromEvent(event: MouseEvent | WheelEvent): { lat: number; lon: number } | null {
+        if (this.mapLibreBase.isActive()) {
+            return this.mapLibreBase.getLatLonFromClientEvent(event);
+        }
+        this.updateRaycaster(event as MouseEvent);
+        return this.flatMap.pickMapLatLon(this.raycaster);
     }
 
     private pickEditableFlatTarget(): Omit<EditableDragTarget, 'lastLatLon' | 'moved'> | null {
@@ -503,7 +524,7 @@ export class SatelliteSimulation {
     private onMouseMove(event: MouseEvent) {
         if (simulationStore.getState().viewMode === '2d' && this.editableDragTarget) {
             this.updateRaycaster(event);
-            const latLon = this.flatMap.pickMapLatLon(this.raycaster);
+            const latLon = this.getFlatLatLonFromEvent(event);
             if (!latLon) return;
             const deltaLat = latLon.lat - this.editableDragTarget.lastLatLon.lat;
             const deltaLon = latLon.lon - this.editableDragTarget.lastLatLon.lon;
@@ -527,6 +548,11 @@ export class SatelliteSimulation {
             const dx = event.clientX - this.flatDragLast.x;
             const dy = event.clientY - this.flatDragLast.y;
             if (Math.abs(dx) + Math.abs(dy) > 2) this.flatDragMoved = true;
+            if (this.mapLibreBase.isActive()) {
+                this.mapLibreBase.panBy(-dx, -dy);
+                this.flatDragLast.set(event.clientX, event.clientY);
+                return;
+            }
             const unitsPerPixelX = (this.flatCamera.right - this.flatCamera.left) / (this.container.clientWidth * this.flatCamera.zoom);
             const unitsPerPixelY = (this.flatCamera.top - this.flatCamera.bottom) / (this.container.clientHeight * this.flatCamera.zoom);
             this.flatCamera.position.x -= dx * unitsPerPixelX;
@@ -623,6 +649,7 @@ export class SatelliteSimulation {
         this.flatCamera.bottom = -flatBounds.height / 2;
         this.flatCamera.updateProjectionMatrix();
         this.flatMap.applyBounds(flatBounds);
+        this.mapLibreBase.resize();
         this.clampFlatCamera();
         this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -643,7 +670,7 @@ export class SatelliteSimulation {
 
     private handleFlatMapClick(event: MouseEvent): void {
         const state = simulationStore.getState();
-        const latLon = this.flatMap.pickMapLatLon(this.raycaster);
+        const latLon = this.getFlatLatLonFromEvent(event);
 
         if (state.workspaceMode === 'create-ground-station' && latLon) {
             simulationStore.createGroundStationAt(latLon.lat, latLon.lon);
@@ -706,7 +733,7 @@ export class SatelliteSimulation {
 
     private handleFlatMapMouseMove(event: MouseEvent): void {
         const state = simulationStore.getState();
-        const latLon = this.flatMap.pickMapLatLon(this.raycaster);
+        const latLon = this.getFlatLatLonFromEvent(event);
 
         if (state.workspaceMode !== 'inspect') {
             simulationStore.hoverSatellite(null);
@@ -771,14 +798,35 @@ export class SatelliteSimulation {
         const state = simulationStore.getState();
         const is2d = state.viewMode === '2d';
         const sunPos = getSunPosition(state.simulationTime);
+        const editSurfaceActive = this.editModeEnabled || state.workspaceMode !== 'inspect';
+        const effectiveMap = editSurfaceActive ? 'dark' : state.selectedMap;
+        const effectiveState = editSurfaceActive
+            ? {
+                ...state,
+                workspaceMode: (this.editModeEnabled && state.workspaceMode === 'inspect')
+                    ? 'create-ground-station' as const
+                    : state.workspaceMode,
+                selectedMap: effectiveMap,
+                showDayNightLayer: false,
+                visibleLayers: []
+            }
+            : state;
+        const mapLibreActive = this.mapLibreBase.setVisible(is2d, effectiveMap);
+        const onlineFlatBasePreferred = is2d && this.onlineMapEnabled;
 
+        this.scene.background = (mapLibreActive || onlineFlatBasePreferred) ? null : this.spaceBackground;
         this.earth.getGroup().visible = !is2d;
         this.flatMap.setVisible(is2d);
+        this.flatMap.setExternalBaseProjection(
+            onlineFlatBasePreferred,
+            mapLibreActive ? ((lat, lon, z, bounds) => this.mapLibreBase.project(lat, lon, z, bounds)) : null,
+            mapLibreActive ? this.mapLibreBase.getTransformRevision() : 0
+        );
         this.controls.enabled = !is2d;
         this.instancedMesh?.setVisible(!is2d);
         this.groundStationLayer?.setVisible(!is2d);
         this.orbitPathLines.forEach(line => { line.visible = !is2d; });
-        if (state.workspaceMode !== 'inspect') {
+        if (effectiveState.workspaceMode !== 'inspect') {
             this.visibilityCones.forEach(cone => { cone.visible = false; });
             this.gsCoverageMeshes.forEach(mesh => { mesh.visible = false; });
         } else {
@@ -789,7 +837,12 @@ export class SatelliteSimulation {
         if (is2d) {
             this.removeFocusedModel();
             this.hideAoi3dLayer();
-            this.flatMap.update(state, sunPos, this.flatCamera);
+            if (mapLibreActive) {
+                this.flatCamera.position.set(0, 0, 20000);
+                this.flatCamera.zoom = 1;
+                this.flatCamera.updateProjectionMatrix();
+            }
+            this.flatMap.update(effectiveState, sunPos, this.flatCamera);
             this.renderer.render(this.scene, this.flatCamera);
             return;
         }
@@ -935,7 +988,13 @@ export class SatelliteSimulation {
         // 4. Update Layers using the cached positions
         this.sunLight.position.copy(sunPos).multiplyScalar(100000);
 
-        this.earth.update(this.camera.position, state.visibleLayers, state.selectedMap, state.showDayNightLayer, sunPos);
+        this.earth.update(
+            this.camera.position,
+            effectiveState.visibleLayers,
+            effectiveState.selectedMap,
+            effectiveState.showDayNightLayer,
+            sunPos
+        );
         
         if (this.instancedMesh) {
             this.instancedMesh.updatePositions(state.satellites, this.satCartesianPositions);
@@ -1562,6 +1621,7 @@ export class SatelliteSimulation {
         this.groundStationLayer?.destroy();
         this.instancedMesh?.destroy();
         this.flatMap.destroy();
+        this.mapLibreBase.destroy();
         this.disposeAoi3dLayer();
         this.orbitPathLines.forEach(line => {
             this.scene.remove(line);

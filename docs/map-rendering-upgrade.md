@@ -4,14 +4,20 @@ This document records the intended long-term solution for high-quality 2D map re
 
 ## Current State
 
-The current stable renderer uses local equirectangular Earth textures for both 2D and 3D. This keeps the application reliable online and offline, keeps 2D/3D visuals consistent, and avoids projection mismatch. The tradeoff is that a single fixed-resolution image cannot stay sharp at deep zoom levels. When the user zooms in, the image pixels are enlarged, so the map can look blurry or stretched.
+The renderer now supports a MapLibre 2D base map with the existing local texture renderer as the automatic fallback. This keeps current simulation functionality intact while allowing crisp online/offline map sources. The 3D globe still uses the local equirectangular textures, because a fully tiled 3D globe requires a separate quadtree/LOD renderer.
 
 The current map styles are intentionally limited to:
 
 - `dark`: local tactical/dim map texture.
 - `satellite`: local brighter Earth texture.
 
-Mapbox token and Mapbox style code are not part of the active source path. Reintroducing Mapbox should be done only through the projection-correct architecture below.
+Mapbox must use a browser-safe public token only:
+
+```bash
+NEXT_PUBLIC_MAPBOX_TOKEN=...
+```
+
+Never commit `.env.local` or a Mapbox secret token.
 
 ## Why The Previous Tile Attempt Failed
 
@@ -78,16 +84,19 @@ The application must work online and offline. The recommended source strategy is
 
 Online:
 
-- Mapbox style JSON and token, or another MapLibre-compatible hosted style.
+- Mapbox public token through `NEXT_PUBLIC_MAPBOX_TOKEN`, or another MapLibre-compatible hosted style.
 - Dark style: vector style is preferred for crisp labels and borders.
 - Satellite style: raster imagery with optional vector label overlay.
 
 Offline:
 
 - Prefer PMTiles for local/offline maps.
-- Example files:
-  - `public/maps/dark.pmtiles`
-  - `public/maps/satellite.pmtiles`
+- Provide MapLibre style JSON files and reference them through:
+  - `NEXT_PUBLIC_MAPLIBRE_DARK_STYLE_URL=/maps/dark-style.json`
+  - `NEXT_PUBLIC_MAPLIBRE_SATELLITE_STYLE_URL=/maps/satellite-style.json`
+- Those style JSON files can reference PMTiles, for example:
+  - `pmtiles:///maps/dark.pmtiles`
+  - `pmtiles:///maps/satellite.pmtiles`
 - Use `pmtiles` protocol integration with MapLibre.
 - Fall back to local equirectangular textures only if tile/style initialization fails.
 
@@ -100,19 +109,19 @@ Why PMTiles:
 
 ## 2D Implementation Plan
 
-1. Add a MapLibre container below the current simulation overlay.
-2. Initialize MapLibre only in 2D mode, or keep it paused/hidden while in 3D mode.
-3. Define two style configs: `dark` and `satellite`.
+1. Add a MapLibre container below the current simulation overlay. Done.
+2. Initialize MapLibre only in 2D mode, or keep it hidden while in 3D mode. Done.
+3. Define two style configs: `dark` and `satellite`. Done.
 4. Add a source resolver:
-   - If online and Mapbox token exists, use hosted style/source.
-   - If offline PMTiles exists, use local PMTiles.
-   - If all tile sources fail, fall back to local texture renderer.
-5. Move 2D base map pan/zoom responsibility to MapLibre.
-6. Replace current 2D map plane picking with MapLibre `lngLat` events.
-7. Keep overlay picking for satellites, ground stations, and targets.
-8. Reproject overlay geometry with `map.project`.
-9. Throttle expensive overlay reprojection during fast map movement.
-10. Preserve existing 3D behavior and state transitions.
+   - If a MapLibre style URL is configured, use that first. Done.
+   - Else if a public Mapbox token exists, use Mapbox raster styles. Done.
+   - If all tile sources fail, fall back to local texture renderer. Done.
+5. Move 2D base map pan/zoom responsibility to MapLibre. Done for MapLibre-active mode.
+6. Replace current 2D map plane picking with MapLibre `lngLat` events. Done for MapLibre-active mode.
+7. Keep overlay picking for satellites, ground stations, and targets. Done.
+8. Reproject overlay geometry with `map.project`. Done.
+9. Throttle expensive overlay reprojection during fast map movement. Pending if profiling shows need.
+10. Preserve existing 3D behavior and state transitions. Done.
 
 ## Overlay Performance Rules
 
@@ -165,4 +174,3 @@ The upgrade is acceptable only if:
 ## Trigger Phrase
 
 When future work says "upgrade map design", use this document as the implementation blueprint.
-

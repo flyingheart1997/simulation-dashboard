@@ -2,6 +2,14 @@ import { h, render } from 'preact';
 import { SimulationDashboard } from './SimulationDashboard';
 import { SatelliteSimulation } from './SatelliteSimulation';
 import { simulationStore } from '../stores/simulationStore';
+import type { MapType } from '../modules/types';
+
+interface SimulationShowOptions {
+    onlineMap?: boolean;
+    editMode?: boolean;
+    mapType?: MapType;
+    viewMode?: '2d' | '3d';
+}
 
 export class SimulationManager {
     private container: HTMLElement | null = null;
@@ -18,11 +26,20 @@ export class SimulationManager {
         }
     }
 
-    public async show(parent: HTMLElement, onExit?: () => void): Promise<void> {
+    public async show(parent: HTMLElement, onExit?: () => void, options: SimulationShowOptions = {}): Promise<void> {
         if (this.isActive) return;
 
         this.onExitCallback = onExit || null;
         this.isActive = true;
+        const editMode = options.editMode ?? false;
+
+        if (editMode) {
+            simulationStore.setWorkspaceMode('create-ground-station');
+        } else {
+            simulationStore.setWorkspaceMode('inspect');
+            if (options.mapType) simulationStore.setMap(options.mapType);
+        }
+        simulationStore.setViewMode(editMode ? '2d' : options.viewMode ?? '3d');
 
         // Create main container
         this.container = document.createElement('div');
@@ -46,7 +63,7 @@ export class SimulationManager {
         this.container.appendChild(this.dashboardRoot);
 
         // Initialize 3D Simulation
-        this.simulation = new SatelliteSimulation(sceneContainer);
+        this.simulation = new SatelliteSimulation(sceneContainer, options.onlineMap ?? false, editMode);
 
         // Initialize Store and Fetch Data
         render(h(SimulationDashboard, {}), this.dashboardRoot);

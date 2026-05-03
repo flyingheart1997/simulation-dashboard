@@ -36,6 +36,10 @@ export class FlatMapLayer {
     private coverageLines: Map<string, THREE.LineSegments> = new Map();
     private coverageFills: Map<string, THREE.Mesh> = new Map();
     private draftPolygonPreviewLatLon: { lat: number; lon: number } | null = null;
+    private externalBaseProjector: ((lat: number, lon: number, z: number, bounds: FlatMapBounds) => THREE.Vector3) | null = null;
+    private externalBaseActive = false;
+    private externalBaseRevision = 0;
+    private renderedExternalBaseRevision = -1;
     private lastCoverageRefreshMs = 0;
     private lastCommRefreshMs = 0;
 
@@ -85,6 +89,18 @@ export class FlatMapLayer {
         this.group.visible = visible;
     }
 
+    setExternalBaseProjection(
+        active: boolean,
+        projector: ((lat: number, lon: number, z: number, bounds: FlatMapBounds) => THREE.Vector3) | null,
+        revision = 0
+    ): void {
+        this.externalBaseActive = active;
+        this.externalBaseProjector = active ? projector : null;
+        this.externalBaseRevision = active ? revision : 0;
+        this.mapMaterial.uniforms.externalBaseActive.value = active ? 1.0 : 0.0;
+        this.mapMesh.visible = true;
+    }
+
     applyBounds(bounds: FlatMapBounds): void {
         this.bounds = bounds;
         this.mapMesh.scale.set(bounds.width, bounds.height, 1);
@@ -99,9 +115,11 @@ export class FlatMapLayer {
         this.updatePolygons(state);
 
         if (state.workspaceMode === 'inspect') {
+            const projectionChanged = this.externalBaseActive && this.externalBaseRevision !== this.renderedExternalBaseRevision;
             this.updateOrbitPaths(state);
-            this.updateCoverageAreas(state);
-            this.updateCommunicationLinks(state);
+            this.updateCoverageAreas(state, projectionChanged);
+            this.updateCommunicationLinks(state, projectionChanged);
+            if (projectionChanged) this.renderedExternalBaseRevision = this.externalBaseRevision;
         } else {
             this.hideInspectionLayers();
         }
@@ -119,6 +137,13 @@ export class FlatMapLayer {
         const hit = raycaster.intersectObject(this.mapMesh, false)[0];
         if (!hit) return null;
         return flatVectorToLatLon(hit.point, this.bounds);
+    }
+
+    private projectLatLon(lat: number, lon: number, z: number): THREE.Vector3 {
+        if (this.externalBaseActive && this.externalBaseProjector) {
+            return this.externalBaseProjector(lat, lon, z, this.bounds);
+        }
+        return latLonToFlatVector3(lat, lon, z, this.bounds);
     }
 
     pickMapPoint(raycaster: THREE.Raycaster): THREE.Vector3 | null {
@@ -211,9 +236,11 @@ export class FlatMapLayer {
                 sunDirection: { value: new THREE.Vector3(1, 0, 0) },
                 showDayNight: { value: 1.0 },
                 mode: { value: 0.0 },
+                externalBaseActive: { value: 0.0 },
                 background: { value: new THREE.Color(0x020812) }
             },
-            depthWrite: true,
+            transparent: true,
+            depthWrite: false,
             vertexShader: `
                 varying vec2 vUv;
                 void main() {
@@ -227,6 +254,7 @@ export class FlatMapLayer {
                 uniform vec3 sunDirection;
                 uniform float showDayNight;
                 uniform float mode;
+                uniform float externalBaseActive;
                 uniform vec3 background;
                 varying vec2 vUv;
                 void main() {
@@ -234,22 +262,23 @@ export class FlatMapLayer {
                     float lat = (vUv.y - 0.5) * 3.14159265359;
                     vec3 normal = normalize(vec3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon)));
                     float intensity = dot(normal, normalize(sunDirection));
-                    vec3 baseColor = texture2D(dayTexture, vUv).rgb;
-                    vec3 color = baseColor;
-                    if (mode < 0.5) {
-                        color = ((baseColor - 0.5) * 1.18 + 0.5) * vec3(0.86, 1.06, 1.2) + vec3(0.0, 0.02, 0.04);
-                        color *= 0.46;
-                    } else {
-                        color = ((baseColor - 0.5) * 1.1 + 0.5) * vec3(1.08, 1.08, 1.04);
-                    }
                     float lit = smoothstep(-0.22, 0.2, intensity);
                     float nightMask = 1.0 - lit;
-                    float shadow = showDayNight > 0.5 ? mix(mode < 0.5 ? 0.22 : 0.36, 1.0, lit) : 1.0;
-                    vec3 nightDetail = texture2D(nightTexture, vUv).rgb * (mode < 0.5 ? 0.16 : 0.16) * nightMask;
-                    vec3 nightTint = mix(background, vec3(0.0, 0.03, 0.065), mode < 0.5 ? 0.55 : 0.25);
-                    float tintStrength = mode < 0.5 ? nightMask * 0.42 : nightMask * 0.26;
-                    vec3 shadedColor = mix(color * shadow + nightDetail, nightTint + nightDetail, showDayNight > 0.5 ? tintStrength : 0.0);
-                    gl_FragColor = vec4(shadedColor, 1.0);
+                    vec3 dayColor = texture2D(dayTexture, vUv).rgb;
+                    vec3 nightColor = texture2D(nightTexture, vUv).rgb;
+                    vec3 visibleNight = min(vec3(1.0), pow(nightColor, vec3(0.78)) * 1.45);
+                    if (mode < 0.5) {
+                        dayColor = ((dayColor - 0.5) * 1.18 + 0.5) * vec3(0.86, 1.06, 1.2) + vec3(0.0, 0.02, 0.04);
+                        dayColor *= 0.46;
+                    }
+                    if (externalBaseActive > 0.5) {
+                        if (showDayNight < 0.5) discard;
+                        float overlayAlpha = nightMask * (mode < 0.5 ? 0.72 : 0.58);
+                        vec3 overlayColor = mix(vec3(0.0, 0.018, 0.04), vec3(0.0, 0.03, 0.07), mode);
+                        gl_FragColor = vec4(overlayColor + visibleNight * nightMask * 0.08, overlayAlpha);
+                    } else {
+                        gl_FragColor = vec4(showDayNight > 0.5 ? mix(visibleNight, dayColor, lit) : dayColor, 1.0);
+                    }
                 }
             `
         });
@@ -300,7 +329,7 @@ export class FlatMapLayer {
         satellites.forEach(sat => {
             this.satellitePositions.set(
                 sat.id,
-                latLonToFlatVector3(sat.position.lat, sat.position.lon, 20, this.bounds)
+                this.projectLatLon(sat.position.lat, sat.position.lon, 20)
             );
         });
 
@@ -333,7 +362,7 @@ export class FlatMapLayer {
         visiblePolygons.forEach(poly => {
             let line = this.polygonLines.get(poly.id);
             const renderPath = this.getRenderPolygonPath(poly);
-            const points = renderPath.map(point => latLonToFlatVector3(point.lat, point.lon, 40, this.bounds));
+            const points = renderPath.map(point => this.projectLatLon(point.lat, point.lon, 40));
             if (poly.isClosed && points.length > 2) points.push(points[0].clone());
             if (showEditableVertices) {
                 poly.points.forEach((point, index) => {
@@ -456,8 +485,8 @@ export class FlatMapLayer {
         }
 
         this.draftPreviewLine.geometry.setFromPoints([
-            latLonToFlatVector3(lastPoint.lat, lastPoint.lon, 52, this.bounds),
-            latLonToFlatVector3(this.draftPolygonPreviewLatLon.lat, this.draftPolygonPreviewLatLon.lon, 52, this.bounds)
+            this.projectLatLon(lastPoint.lat, lastPoint.lon, 52),
+            this.projectLatLon(this.draftPolygonPreviewLatLon.lat, this.draftPolygonPreviewLatLon.lon, 52)
         ]);
         this.draftPreviewLine.visible = true;
     }
@@ -506,14 +535,14 @@ export class FlatMapLayer {
         });
     }
 
-    private updateCommunicationLinks(state: SimulationState): void {
+    private updateCommunicationLinks(state: SimulationState, forceRefresh = false): void {
         if (!state.showCommLinks) {
             this.commLines.forEach(line => { line.visible = false; });
             return;
         }
 
         const now = performance.now();
-        if (now - this.lastCommRefreshMs < 200 && this.commLines.size > 0) return;
+        if (!forceRefresh && now - this.lastCommRefreshMs < 120 && this.commLines.size > 0) return;
         this.lastCommRefreshMs = now;
 
         const activeGsIds = new Set<string>();
@@ -558,7 +587,7 @@ export class FlatMapLayer {
         });
     }
 
-    private updateCoverageAreas(state: SimulationState): void {
+    private updateCoverageAreas(state: SimulationState, forceRefresh = false): void {
         if (!state.showGSNCoverage) {
             this.coverageLines.forEach(line => { line.visible = false; });
             this.coverageFills.forEach(fill => { fill.visible = false; });
@@ -566,7 +595,7 @@ export class FlatMapLayer {
         }
 
         const now = performance.now();
-        if (now - this.lastCoverageRefreshMs < 250 && this.coverageLines.size > 0) return;
+        if (!forceRefresh && now - this.lastCoverageRefreshMs < 120 && this.coverageLines.size > 0) return;
         this.lastCoverageRefreshMs = now;
 
         const activeGsIds = new Set<string>();
@@ -641,8 +670,8 @@ export class FlatMapLayer {
     private buildWrappedSegment(a: { lat: number; lon: number }, b: { lat: number; lon: number }, z: number): THREE.Vector3[] {
         if (Math.abs(a.lon - b.lon) > 180) return [];
         return [
-            latLonToFlatVector3(a.lat, a.lon, z, this.bounds),
-            latLonToFlatVector3(b.lat, b.lon, z, this.bounds)
+            this.projectLatLon(a.lat, a.lon, z),
+            this.projectLatLon(b.lat, b.lon, z)
         ];
     }
 
@@ -653,8 +682,8 @@ export class FlatMapLayer {
             const current = path[i];
             if (Math.abs(current.lon - prev.lon) > 180) continue;
             points.push(
-                latLonToFlatVector3(prev.lat, prev.lon, z, this.bounds),
-                latLonToFlatVector3(current.lat, current.lon, z, this.bounds)
+                this.projectLatLon(prev.lat, prev.lon, z),
+                this.projectLatLon(current.lat, current.lon, z)
             );
         }
         return points;
@@ -667,7 +696,7 @@ export class FlatMapLayer {
         }
         const shape = new THREE.Shape();
         path.forEach((point, index) => {
-            const projected = latLonToFlatVector3(point.lat, point.lon, z, this.bounds);
+            const projected = this.projectLatLon(point.lat, point.lon, z);
             if (index === 0) shape.moveTo(projected.x, projected.y);
             else shape.lineTo(projected.x, projected.y);
         });
@@ -684,7 +713,7 @@ export class FlatMapLayer {
         }
         const shape = new THREE.Shape();
         path.forEach((point, index) => {
-            const projected = latLonToFlatVector3(point.lat, point.lon, 0, this.bounds);
+            const projected = this.projectLatLon(point.lat, point.lon, 0);
             if (index === 0) shape.moveTo(projected.x, projected.y);
             else shape.lineTo(projected.x, projected.y);
         });
@@ -732,7 +761,7 @@ export class FlatMapLayer {
         const count = Math.min(points.length, layer.capacity);
         for (let i = 0; i < count; i++) {
             const point = points[i];
-            const pos = latLonToFlatVector3(point.lat, point.lon, 0, this.bounds);
+            const pos = this.projectLatLon(point.lat, point.lon, 0);
             posAttr.setXYZ(i, pos.x, pos.y, pos.z);
             const color = point.active ? layer.activeColor : layer.color;
             colorAttr.setXYZ(i, color.r, color.g, color.b);
