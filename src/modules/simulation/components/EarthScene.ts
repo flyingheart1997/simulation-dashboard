@@ -106,7 +106,7 @@ export class EarthScene {
                         dayColor.rgb = ((baseColor - 0.5) * contrast + 0.5) * brightness * vec3(0.86, 1.06, 1.2) + vec3(0.0, 0.02, 0.04);
                         dayColor.rgb *= 0.46;
                     } else {
-                        dayColor.rgb = ((baseColor - 0.5) * contrast + 0.5) * brightness * vec3(1.08, 1.08, 1.04);
+                        dayColor.rgb = baseColor;
                     }
                     if (showDayNight > 0.5) {
                         gl_FragColor = vec4(mix(visibleNight, dayColor.rgb, lit), 1.0);
@@ -201,9 +201,9 @@ export class EarthScene {
                     float intensity = dot(normalize(vWorldNormal), normalize(sunDirection));
                     float lit = smoothstep(-0.22, 0.2, intensity);
                     float nightMask = 1.0 - lit;
-                    vec3 nightDetail = texture2D(nightTexture, vUv).rgb * nightMask * 0.18;
-                    vec3 tint = mode < 0.5 ? vec3(0.0, 0.012, 0.035) : vec3(0.0, 0.018, 0.052);
-                    float alpha = nightMask * (mode < 0.5 ? 0.62 : 0.52);
+                    vec3 nightDetail = texture2D(nightTexture, vUv).rgb * nightMask * (mode < 0.5 ? 0.18 : 0.28);
+                    vec3 tint = mode < 0.5 ? vec3(0.0, 0.012, 0.035) : vec3(0.0, 0.012, 0.034);
+                    float alpha = nightMask * (mode < 0.5 ? 0.62 : 0.72);
                     gl_FragColor = vec4(tint + nightDetail, alpha);
                     #include <logdepthbuf_fragment>
                 }

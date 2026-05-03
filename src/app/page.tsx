@@ -37,10 +37,10 @@ export default function Home() {
                 satellites={MOCK_SATELLITES}
                 groundStations={MOCK_GROUND_STATIONS}
                 dashboardType='simulation'
-                onlineMap={true}
+                onlineMap={false}
                 editMode={false}
                 mapType='light'
-                viewType='2D'
+                viewType='3D'
             />
         </main>
     );

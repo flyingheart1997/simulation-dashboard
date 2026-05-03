@@ -270,8 +270,6 @@ export class FlatMapLayer {
                     if (mode < 0.5) {
                         dayColor = ((dayColor - 0.5) * 1.18 + 0.5) * vec3(0.86, 1.06, 1.2) + vec3(0.0, 0.02, 0.04);
                         dayColor *= 0.46;
-                    } else {
-                        dayColor = ((dayColor - 0.5) * 1.1 + 0.5) * vec3(1.08, 1.08, 1.04);
                     }
                     if (externalBaseActive > 0.5) {
                         if (showDayNight < 0.5) discard;
