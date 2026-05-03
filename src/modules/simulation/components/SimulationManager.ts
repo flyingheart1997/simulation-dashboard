@@ -2,7 +2,7 @@ import { h, render } from 'preact';
 import { SimulationDashboard } from './SimulationDashboard';
 import { SatelliteSimulation } from './SatelliteSimulation';
 import { simulationStore } from '../stores/simulationStore';
-import type { MapType } from '../modules/types';
+import type { MapType } from '../types/types';
 
 interface SimulationShowOptions {
     onlineMap?: boolean;
@@ -70,7 +70,7 @@ export class SimulationManager {
 
         // Start data fetching
         await simulationStore.init();
-        
+
         // Start simulation loop
         this.startUpdateLoop();
     }

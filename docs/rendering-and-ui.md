@@ -1,48 +1,104 @@
 # Rendering and UI Pipeline
 
-The visual output of the Antaris Visualization is split into an immersive 3D WebGL scene and a responsive 2D UI overlay.
+The Antaris visualization is split into an imperative rendering layer and a lightweight dashboard layer. The renderer owns continuous 2D/3D simulation drawing, while the UI owns controls, settings, tooltips, and workflow state.
 
-## 3D Rendering (`SatelliteSimulation.ts`)
+## Render Loop
 
-The Three.js scene is carefully constructed to handle planetary scale coordinates without visual artifacts.
+`SimulationManager.ts` owns the `requestAnimationFrame` loop and calls `SatelliteSimulation.tick()` every frame.
 
-### Key Optimization: InstancedMesh
-Rendering 10,000 independent `THREE.Mesh` objects would crush the browser. Instead, `SatelliteInstancedMesh.ts` uses `THREE.InstancedMesh`.
-- A single geometry (e.g., a simple box or sphere) and material is used for all un-focused satellites.
-- A `Float32Array` holding the transformation matrices (`Matrix4`) is updated every frame.
-- The `updatePositions` method iterates over the `satCartesianPositions` map (pre-calculated earlier in the frame), updates the translation matrix for that specific instance index, and flags `instanceMatrix.needsUpdate = true`.
+`SatelliteSimulation.ts` coordinates:
 
-### Logarithmic Depth Buffer
-Because the camera can zoom from 500km to 500,000km, the near and far clipping planes have extreme ranges. The `WebGLRenderer` is instantiated with `logarithmicDepthBuffer: true` to dynamically adjust depth precision and eliminate Z-fighting (flickering of overlapping surfaces, especially on the Earth sphere).
+- Current store state.
+- Satellite propagation results.
+- 2D or 3D camera mode.
+- Map layer updates.
+- Entity hover and selection.
+- Ground station coverage and communication links.
+- AOI, ground target, and create/edit workflows.
 
-### Focused Models vs. Instanced Models
-When a satellite is clicked or hovered, a high-fidelity 3D model (built from primitives in `createSatelliteModel`) is instantiated and placed at the satellite's exact coordinate.
-- The high-fidelity model calculates its velocity vector (by propagating 1 second into the future) to orient itself using `lookAt()` so it always faces its direction of travel.
-- The instanced point for that specific satellite remains, but the detailed model provides visual focus.
+The render loop reads from the store directly. It does not wait for React or Preact rerenders, which keeps camera movement and simulation playback responsive.
 
-### Camera Transitions (GSAP)
-`OrbitControls` handles standard mouse dragging and zooming. However, mode switches (2D to 3D) or focusing on a specific satellite use `gsap.to()` to smoothly tween the `camera.position` and `controls.target`.
+## 3D Rendering
 
-## The UI Overlay (`SimulationDashboard.tsx`)
+The 3D view uses Three.js directly.
 
-The dashboard is built with Preact and sits above the Three.js canvas.
+Key components:
 
-## Future 2D Map Upgrade
+- `EarthScene.ts`: Earth surface, day/night treatment, online tiled globe, offline texture shader, and environmental layers.
+- `TiledGlobeLayer.ts`: Online Mapbox/MapLibre raster tiles on the globe.
+- `SatelliteInstancedMesh.ts`: Batched satellite rendering.
+- `GroundStationMesh.ts`: Ground station markers, coverage, and links.
 
-The current stable 2D map path uses local equirectangular textures so 2D and 3D remain reliable online and offline. A future zoom-perfect map design upgrade should not stretch WebMercator tiles onto this plane. Use the projection-correct MapLibre + simulation overlay plan documented in [map-rendering-upgrade.md](./map-rendering-upgrade.md).
+The 3D globe supports two map paths:
 
-### The Throttle Mechanism
-The dashboard calls `simulationStore.subscribe(() => this.forceUpdate())`. 
-Because the physics update loop (`update()`) runs constantly to advance time, triggering a React/Preact update every frame would destroy performance.
-The `simulationStore` restricts calls to `notify()` to a maximum frequency of ~30Hz (32ms throttle). This ensures the UI remains responsive but doesn't steal CPU cycles from WebGL.
+- Online: raster tiles rendered through `TiledGlobeLayer`.
+- Offline: local day/night texture blend using the selected day-side map and `earth-night.jpg` for the night side.
 
-### Time Scrubber & Controllers
-The bottom bar contains a custom speed controller.
-- Scrubbing the timeline or changing speeds updates the store's `speed` variable.
-- The store's time calculation multiplies the raw delta-time (from `requestAnimationFrame`) by the `speed` variable.
-- Rewinding (negative speed) is fully supported, and the physics engines naturally calculate positions backward.
+`OrbitControls` handles manual rotate and zoom. Programmatic transitions, such as focusing a satellite or switching from 2D back to 3D, use GSAP tweens for smooth camera movement.
 
-### Interactive Tooltips
-Mouse movements in `SatelliteSimulation.ts` use a `Raycaster`. 
-If a satellite or ground station is hit, it writes the `hoveredSatelliteId` and `tooltipPos` (screen coordinates) into the store.
-The Dashboard component reads these screen coordinates and renders an absolute-positioned DOM element over the WebGL canvas, providing immediate telemetry feedback.
+## 2D Rendering
+
+The 2D view has a base map plus a synchronized simulation overlay.
+
+Online:
+
+- `MapLibreBaseLayer` renders the base map.
+- MapLibre owns pan, zoom, labels, tile loading, and projection.
+- `FlatMapLayer` renders simulation entities in a transparent Three.js overlay.
+
+Offline:
+
+- `FlatMapLayer` renders the local equirectangular texture path.
+- Day side uses the selected local dark or light texture.
+- Night side blends to the local night texture when day/night is enabled.
+
+Overlay objects are reprojected when the simulation time changes or when the map transform changes. The MapLibre layer exposes a transform revision so coverage circles, communication links, orbit paths, AOIs, and icons stay locked to the map during pan and zoom.
+
+## UI Overlay
+
+`SimulationDashboard.tsx` is built with Preact and sits above the renderer.
+
+It handles:
+
+- Settings.
+- Map type selection.
+- 2D/3D switching.
+- Timeline and speed controls.
+- Tooltip rendering.
+- Create/edit workflow controls.
+
+The dashboard subscribes to the simulation store. Store notifications are throttled so the UI can update at a practical cadence without stealing frame time from WebGL.
+
+## Interaction Model
+
+Inspect mode:
+
+- Satellite and ground station hover shows tooltips.
+- Selection updates store state and may focus the camera.
+- Satellite orbit paths, visibility cones, ground station coverage, and communication links remain visible based on toggles.
+- AOIs render as filled polygons with outlines; vertex handles are hidden.
+
+Create/edit mode:
+
+- Starts in 2D and uses the dark editing map.
+- Disables day/night and inspect-only overlays.
+- Shows only the active draft or edited object.
+- Ground station and ground target creation commits on click, then supports dragging.
+- AOI creation previews from the first point to the cursor, requires at least three unique points, and commits on double-click.
+- Closed AOIs can be dragged as a single shape.
+- Switching to 3D exits create/edit mode and discards invalid AOI drafts.
+
+## Tooltip Rules
+
+Tooltips are positioned from the cursor or projected entity screen location, then clamped inside the viewport. This prevents edge objects from opening panels outside the visible app frame.
+
+## Performance Notes
+
+- Keep high-frequency simulation work inside the imperative render loop.
+- Keep Preact updates throttled.
+- Use instancing or grouped meshes for repeated entities.
+- Reuse materials and geometry buffers where possible.
+- Reproject 2D overlay geometry immediately on map movement, but throttle expensive geodesic recomputation.
+- Keep day/night, environmental layers, and inspect overlays disabled in edit mode.
+
+More map-specific notes live in [map-rendering-upgrade.md](./map-rendering-upgrade.md).

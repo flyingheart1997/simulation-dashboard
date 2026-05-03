@@ -5,7 +5,7 @@ import {
     SimulationState, TleData, GroundStation, DEFAULT_GROUND_STATIONS, SimulatedSatellite,
     KeplerParams, PredictedPass, DashboardType, WorkspaceInteractionMode, GroundTarget,
     EditablePolygon, MapType, DEFAULT_AREAS_OF_INTEREST
-} from '../modules/types';
+} from '../types';
 import { calculateElevation } from '../utils/coordUtils';
 
 class SimulationStore {

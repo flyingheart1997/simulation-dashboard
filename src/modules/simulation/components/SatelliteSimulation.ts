@@ -6,7 +6,7 @@ import { SatelliteInstancedMesh } from './SatelliteInstancedMesh';
 import { GroundStationLayer } from './GroundStationMesh';
 import { FlatMapLayer } from './FlatMapLayer';
 import { MapLibreBaseLayer } from './MapLibreBaseLayer';
-import type { EditablePolygon, SimulatedSatellite } from '../modules/types';
+import type { EditablePolygon, SimulatedSatellite } from '../types/types';
 import { simulationStore } from '../stores/simulationStore';
 import { getSunPosition } from '../utils/sunUtils';
 import { getSatelliteColor } from '../utils/satelliteUtils';
@@ -114,8 +114,8 @@ export class SatelliteSimulation {
         this.flatCamera.position.set(0, 0, 20000);
         this.flatCamera.lookAt(0, 0, 0);
 
-        this.renderer = new THREE.WebGLRenderer({ 
-            antialias: true, 
+        this.renderer = new THREE.WebGLRenderer({
+            antialias: true,
             alpha: true,
             logarithmicDepthBuffer: true // Anti-flicker for space scale
         });
@@ -233,8 +233,8 @@ export class SatelliteSimulation {
         this.targetTween?.kill();
 
         // Closer Home positions for better visibility
-        const targetPos = state.viewMode === '2d' 
-            ? new THREE.Vector3(0, 0, 35000) 
+        const targetPos = state.viewMode === '2d'
+            ? new THREE.Vector3(0, 0, 35000)
             : new THREE.Vector3(12000, 12000, 24000);
 
         this.targetTween = gsap.to(this.controls.target, {
@@ -475,16 +475,16 @@ export class SatelliteSimulation {
         if (simulationStore.getState().workspaceMode !== 'inspect') {
             return;
         }
-        
+
         const satHit = this.getIntersectedSatelliteHit();
         const gsId = this.groundStationLayer?.getIntersectedGsId(this.raycaster);
         const polygonId = this.pickAoi3dPolygon();
         const earthIntersect = this.raycaster.intersectObject(this.scene.getObjectByName('earth') || this.scene, true);
-        
+
         // Pick the closest hit logically
         // Note: For GS, we don't have the distance here easily without refactoring GS layer, 
         // but we can assume if gsId is found, it's a valid intent.
-        
+
         if (satHit && !gsId) {
             simulationStore.selectSatellite(satHit.id);
             simulationStore.selectGroundStation(null);
@@ -577,7 +577,7 @@ export class SatelliteSimulation {
             this.renderer.domElement.style.cursor = 'crosshair';
             return;
         }
-        
+
         const satHit = this.getIntersectedSatelliteHit();
         const gsId = this.groundStationLayer?.getIntersectedGsId(this.raycaster);
         const polygonId = this.pickAoi3dPolygon();
@@ -615,13 +615,13 @@ export class SatelliteSimulation {
 
     private getIntersectedSatelliteHit(): { id: string, distance: number } | null {
         if (!this.instancedMesh) return null;
-        
+
         const meshes = this.instancedMesh.getMeshes();
         const satIntersects = this.raycaster.intersectObjects(meshes);
         if (satIntersects.length === 0) return null;
 
         const firstSat = satIntersects[0];
-        
+
         // 1. Occlusion Check: Does Earth block this satellite?
         const earthIntersect = this.raycaster.intersectObject(this.earth.getGroup(), true);
         if (earthIntersect.length > 0 && earthIntersect[0].distance < firstSat.distance) {
@@ -850,11 +850,11 @@ export class SatelliteSimulation {
         // 1. Scene Transition (2D/3D via GSAP)
         if (state.viewMode !== this.lastViewMode) {
             this.lastViewMode = state.viewMode;
-            
-            const targetPos = state.viewMode === '2d' 
-                ? new THREE.Vector3(0, 0, 35000) 
+
+            const targetPos = state.viewMode === '2d'
+                ? new THREE.Vector3(0, 0, 35000)
                 : new THREE.Vector3(12000, 12000, 24000);
-            
+
             this.cameraTween?.kill();
             this.targetTween?.kill();
 
@@ -878,7 +878,7 @@ export class SatelliteSimulation {
         state.satellites.forEach((sat: SimulatedSatellite) => {
             if (sat.position) {
                 this.satCartesianPositions.set(
-                    sat.id, 
+                    sat.id,
                     latLonToVector3(sat.position.lat, sat.position.lon, sat.position.alt)
                 );
             }
@@ -912,20 +912,20 @@ export class SatelliteSimulation {
                     this.lastSelectedGsId = null;
                     this.isZoomed = false;
                     this.controls.minDistance = 500; // Allow close zoom
-                    
+
                     // Smooth Jump to Satellite using GSAP
                     this.cameraTween?.kill();
                     this.targetTween?.kill();
-                    
+
                     const upDir = pos.clone().normalize();
                     const desiredCamPos = pos.clone().add(upDir.multiplyScalar(10000));
-                    
+
                     this.targetTween = gsap.to(this.controls.target, {
                         x: pos.x, y: pos.y, z: pos.z,
                         duration: 1.2,
                         ease: "power3.out"
                     });
-                    
+
                     this.cameraTween = gsap.to(this.camera.position, {
                         x: desiredCamPos.x, y: desiredCamPos.y, z: desiredCamPos.z,
                         duration: 1.2,
@@ -936,11 +936,11 @@ export class SatelliteSimulation {
                     // Constant Update (Sync with prop) ONLY IF NOT INTERACTING
                     const lastSatPos = this.lastFollowSatPos || pos.clone();
                     this.lastFollowSatPos = pos.clone();
-                    
+
                     const v1 = lastSatPos.clone().normalize();
                     const v2 = pos.clone().normalize();
                     const quaternion = new THREE.Quaternion().setFromUnitVectors(v1, v2);
-                    
+
                     this.camera.position.applyQuaternion(quaternion);
                     this.controls.target.copy(pos);
                 }
@@ -995,7 +995,7 @@ export class SatelliteSimulation {
             effectiveState.showDayNightLayer,
             sunPos
         );
-        
+
         if (this.instancedMesh) {
             this.instancedMesh.updatePositions(state.satellites, this.satCartesianPositions);
         }

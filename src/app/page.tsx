@@ -1,5 +1,5 @@
 import { OriginalSimulation } from "@/modules/simulation/components/OriginalSimulation";
-import { ManualGroundStation } from "@/modules/simulation/modules/types";
+import { ManualGroundStation } from "@/modules/simulation/types/types";
 
 const DEMO_START_TIME = Date.now();
 const SATELLITE_CATEGORIES = ['operational', 'communication', 'weather', 'gps'];

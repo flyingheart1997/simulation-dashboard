@@ -1,6 +1,6 @@
 import { h, Component } from 'preact';
 import { simulationStore } from '../stores/simulationStore';
-import type { EditablePolygon, MapType, WorkspaceInteractionMode } from '../modules/types';
+import type { EditablePolygon, MapType, WorkspaceInteractionMode } from '../types/types';
 import '../styles/sim-dashboard-modern.css';
 
 export class SimulationDashboard extends Component<any, { dragSpeed: number | null, collapsedPanels: Record<string, boolean>, isSettingsOpen: boolean }> {

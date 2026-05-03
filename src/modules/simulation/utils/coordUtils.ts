@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SatellitePosition, GroundStation } from '../modules/types';
+import { SatellitePosition, GroundStation } from '../types/types';
 
 /**
  * Converts Geodetic coordinates (Lat, Lon, Alt) to Cartesian ECEF (X, Y, Z).
