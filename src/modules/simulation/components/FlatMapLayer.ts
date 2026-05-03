@@ -38,6 +38,8 @@ export class FlatMapLayer {
     private draftPolygonPreviewLatLon: { lat: number; lon: number } | null = null;
     private externalBaseProjector: ((lat: number, lon: number, z: number, bounds: FlatMapBounds) => THREE.Vector3) | null = null;
     private externalBaseActive = false;
+    private externalBaseRevision = 0;
+    private renderedExternalBaseRevision = -1;
     private lastCoverageRefreshMs = 0;
     private lastCommRefreshMs = 0;
 
@@ -89,10 +91,12 @@ export class FlatMapLayer {
 
     setExternalBaseProjection(
         active: boolean,
-        projector: ((lat: number, lon: number, z: number, bounds: FlatMapBounds) => THREE.Vector3) | null
+        projector: ((lat: number, lon: number, z: number, bounds: FlatMapBounds) => THREE.Vector3) | null,
+        revision = 0
     ): void {
         this.externalBaseActive = active;
         this.externalBaseProjector = active ? projector : null;
+        this.externalBaseRevision = active ? revision : 0;
         this.mapMaterial.uniforms.externalBaseActive.value = active ? 1.0 : 0.0;
         this.mapMesh.visible = true;
     }
@@ -111,9 +115,11 @@ export class FlatMapLayer {
         this.updatePolygons(state);
 
         if (state.workspaceMode === 'inspect') {
+            const projectionChanged = this.externalBaseActive && this.externalBaseRevision !== this.renderedExternalBaseRevision;
             this.updateOrbitPaths(state);
-            this.updateCoverageAreas(state);
-            this.updateCommunicationLinks(state);
+            this.updateCoverageAreas(state, projectionChanged);
+            this.updateCommunicationLinks(state, projectionChanged);
+            if (projectionChanged) this.renderedExternalBaseRevision = this.externalBaseRevision;
         } else {
             this.hideInspectionLayers();
         }
@@ -535,14 +541,14 @@ export class FlatMapLayer {
         });
     }
 
-    private updateCommunicationLinks(state: SimulationState): void {
+    private updateCommunicationLinks(state: SimulationState, forceRefresh = false): void {
         if (!state.showCommLinks) {
             this.commLines.forEach(line => { line.visible = false; });
             return;
         }
 
         const now = performance.now();
-        if (now - this.lastCommRefreshMs < 200 && this.commLines.size > 0) return;
+        if (!forceRefresh && now - this.lastCommRefreshMs < 120 && this.commLines.size > 0) return;
         this.lastCommRefreshMs = now;
 
         const activeGsIds = new Set<string>();
@@ -587,7 +593,7 @@ export class FlatMapLayer {
         });
     }
 
-    private updateCoverageAreas(state: SimulationState): void {
+    private updateCoverageAreas(state: SimulationState, forceRefresh = false): void {
         if (!state.showGSNCoverage) {
             this.coverageLines.forEach(line => { line.visible = false; });
             this.coverageFills.forEach(fill => { fill.visible = false; });
@@ -595,7 +601,7 @@ export class FlatMapLayer {
         }
 
         const now = performance.now();
-        if (now - this.lastCoverageRefreshMs < 250 && this.coverageLines.size > 0) return;
+        if (!forceRefresh && now - this.lastCoverageRefreshMs < 120 && this.coverageLines.size > 0) return;
         this.lastCoverageRefreshMs = now;
 
         const activeGsIds = new Set<string>();

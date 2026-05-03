@@ -802,7 +802,8 @@ export class SatelliteSimulation {
         this.flatMap.setVisible(is2d);
         this.flatMap.setExternalBaseProjection(
             onlineFlatBasePreferred,
-            mapLibreActive ? ((lat, lon, z, bounds) => this.mapLibreBase.project(lat, lon, z, bounds)) : null
+            mapLibreActive ? ((lat, lon, z, bounds) => this.mapLibreBase.project(lat, lon, z, bounds)) : null,
+            mapLibreActive ? this.mapLibreBase.getTransformRevision() : 0
         );
         this.controls.enabled = !is2d;
         this.instancedMesh?.setVisible(!is2d);

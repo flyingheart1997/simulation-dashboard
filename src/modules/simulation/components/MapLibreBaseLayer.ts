@@ -47,6 +47,9 @@ export class MapLibreBaseLayer {
     private active = false;
     private failed = false;
     private currentMapType: MapType | null = null;
+    private transformRevision = 0;
+    private viewportWidth = 1;
+    private viewportHeight = 1;
 
     constructor(parent: HTMLElement, private readonly onlineMapEnabled: boolean) {
         this.container = document.createElement('div');
@@ -80,6 +83,7 @@ export class MapLibreBaseLayer {
 
         this.container.style.display = 'block';
         this.active = true;
+        this.updateViewportSize();
         this.map?.resize();
         return true;
     }
@@ -89,12 +93,15 @@ export class MapLibreBaseLayer {
     }
 
     resize(): void {
+        this.updateViewportSize();
         this.map?.resize();
+        this.transformRevision++;
     }
 
     panBy(deltaX: number, deltaY: number): void {
         if (!this.isActive()) return;
         this.map?.panBy([deltaX, deltaY], { duration: 0 });
+        this.transformRevision++;
     }
 
     zoomByWheel(event: WheelEvent): void {
@@ -106,15 +113,19 @@ export class MapLibreBaseLayer {
         const zoomDelta = -clampedDelta * 0.003;
         const nextZoom = Math.max(this.map.getMinZoom(), Math.min(this.map.getMaxZoom(), this.map.getZoom() + zoomDelta));
         this.map.zoomTo(nextZoom, { around, duration: 0 });
+        this.transformRevision++;
+    }
+
+    getTransformRevision(): number {
+        return this.transformRevision;
     }
 
     project(lat: number, lon: number, z: number, bounds: FlatMapBounds): THREE.Vector3 {
         const point = this.map?.project([lon, lat]);
         if (!point) return new THREE.Vector3(0, 0, z);
-        const rect = this.container.getBoundingClientRect();
         return new THREE.Vector3(
-            (point.x / Math.max(1, rect.width) - 0.5) * bounds.width,
-            (0.5 - point.y / Math.max(1, rect.height)) * bounds.height,
+            (point.x / this.viewportWidth - 0.5) * bounds.width,
+            (0.5 - point.y / this.viewportHeight) * bounds.height,
             z
         );
     }
@@ -130,6 +141,12 @@ export class MapLibreBaseLayer {
         this.map?.remove();
         this.map = null;
         this.container.remove();
+    }
+
+    private updateViewportSize(): void {
+        const rect = this.container.getBoundingClientRect();
+        this.viewportWidth = Math.max(1, rect.width);
+        this.viewportHeight = Math.max(1, rect.height);
     }
 
     private createMap(mapType: MapType, style: StyleSpecification | string): void {
@@ -149,6 +166,11 @@ export class MapLibreBaseLayer {
 
         this.map.once('load', () => {
             this.map?.fitBounds([[-180, -72], [180, 82]], { duration: 0, padding: 0 });
+            this.transformRevision++;
+        });
+
+        this.map.on('move', () => {
+            this.transformRevision++;
         });
 
         this.map.on('error', () => {
