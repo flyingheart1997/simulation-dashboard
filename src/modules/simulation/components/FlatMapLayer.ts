@@ -262,28 +262,24 @@ export class FlatMapLayer {
                     float lat = (vUv.y - 0.5) * 3.14159265359;
                     vec3 normal = normalize(vec3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon)));
                     float intensity = dot(normal, normalize(sunDirection));
-                    vec3 baseColor = texture2D(dayTexture, vUv).rgb;
-                    vec3 color = baseColor;
-                    if (mode < 0.5) {
-                        color = ((baseColor - 0.5) * 1.18 + 0.5) * vec3(0.86, 1.06, 1.2) + vec3(0.0, 0.02, 0.04);
-                        color *= 0.46;
-                    } else {
-                        color = ((baseColor - 0.5) * 1.1 + 0.5) * vec3(1.08, 1.08, 1.04);
-                    }
                     float lit = smoothstep(-0.22, 0.2, intensity);
                     float nightMask = 1.0 - lit;
-                    float shadow = showDayNight > 0.5 ? mix(mode < 0.5 ? 0.22 : 0.36, 1.0, lit) : 1.0;
-                    vec3 nightDetail = texture2D(nightTexture, vUv).rgb * (mode < 0.5 ? 0.16 : 0.16) * nightMask;
-                    vec3 nightTint = mix(background, vec3(0.0, 0.03, 0.065), mode < 0.5 ? 0.55 : 0.25);
-                    float tintStrength = mode < 0.5 ? nightMask * 0.42 : nightMask * 0.26;
-                    vec3 shadedColor = mix(color * shadow + nightDetail, nightTint + nightDetail, showDayNight > 0.5 ? tintStrength : 0.0);
+                    vec3 dayColor = texture2D(dayTexture, vUv).rgb;
+                    vec3 nightColor = texture2D(nightTexture, vUv).rgb;
+                    vec3 visibleNight = min(vec3(1.0), pow(nightColor, vec3(0.78)) * 1.45);
+                    if (mode < 0.5) {
+                        dayColor = ((dayColor - 0.5) * 1.18 + 0.5) * vec3(0.86, 1.06, 1.2) + vec3(0.0, 0.02, 0.04);
+                        dayColor *= 0.46;
+                    } else {
+                        dayColor = ((dayColor - 0.5) * 1.1 + 0.5) * vec3(1.08, 1.08, 1.04);
+                    }
                     if (externalBaseActive > 0.5) {
                         if (showDayNight < 0.5) discard;
                         float overlayAlpha = nightMask * (mode < 0.5 ? 0.72 : 0.58);
                         vec3 overlayColor = mix(vec3(0.0, 0.018, 0.04), vec3(0.0, 0.03, 0.07), mode);
-                        gl_FragColor = vec4(overlayColor + nightDetail * 0.45, overlayAlpha);
+                        gl_FragColor = vec4(overlayColor + visibleNight * nightMask * 0.08, overlayAlpha);
                     } else {
-                        gl_FragColor = vec4(shadedColor, 1.0);
+                        gl_FragColor = vec4(showDayNight > 0.5 ? mix(visibleNight, dayColor, lit) : dayColor, 1.0);
                     }
                 }
             `

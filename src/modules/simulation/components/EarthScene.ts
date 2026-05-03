@@ -100,6 +100,7 @@ export class EarthScene {
                     vec4 nightColor = texture2D(nightTexture, vUv);
                     if (dayColor.a < 0.1) dayColor = vec4(0.05, 0.1, 0.2, 1.0);
                     if (nightColor.a < 0.1) nightColor = vec4(0.0, 0.01, 0.02, 1.0);
+                    vec3 visibleNight = min(vec3(1.0), pow(nightColor.rgb, vec3(0.78)) * 1.45);
                     vec3 baseColor = dayColor.rgb;
                     if (mode < 0.5) {
                         dayColor.rgb = ((baseColor - 0.5) * contrast + 0.5) * brightness * vec3(0.86, 1.06, 1.2) + vec3(0.0, 0.02, 0.04);
@@ -108,13 +109,7 @@ export class EarthScene {
                         dayColor.rgb = ((baseColor - 0.5) * contrast + 0.5) * brightness * vec3(1.08, 1.08, 1.04);
                     }
                     if (showDayNight > 0.5) {
-                        float nightMask = 1.0 - lit;
-                        float shadow = mix(mode < 0.5 ? 0.22 : 0.36, 1.0, lit);
-                        vec3 nightDetail = nightColor.rgb * (mode < 0.5 ? 0.16 : 0.16) * nightMask;
-                        vec3 nightTint = mix(background, vec3(0.0, 0.03, 0.065), mode < 0.5 ? 0.55 : 0.25);
-                        float tintStrength = mode < 0.5 ? nightMask * 0.42 : nightMask * 0.26;
-                        vec3 shadedColor = mix(dayColor.rgb * shadow + nightDetail, nightTint + nightDetail, tintStrength);
-                        gl_FragColor = vec4(shadedColor, 1.0);
+                        gl_FragColor = vec4(mix(visibleNight, dayColor.rgb, lit), 1.0);
                     } else {
                         gl_FragColor = dayColor;
                     }
