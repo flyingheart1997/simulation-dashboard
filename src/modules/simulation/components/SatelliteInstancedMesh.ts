@@ -11,9 +11,9 @@ export class SatelliteInstancedMesh {
     private categoryIds: Map<string, string[]> = new Map();
     private textures: Map<string, THREE.Texture> = new Map();
     private maxCount: number;
-    private scene: THREE.Scene;
+    private scene: THREE.Object3D;
 
-    constructor(scene: THREE.Scene, initialCount: number = 0) {
+    constructor(scene: THREE.Object3D, initialCount: number = 0) {
         this.scene = scene;
         this.maxCount = Math.max(initialCount, 15000);
 
@@ -174,6 +174,10 @@ export class SatelliteInstancedMesh {
 
     public getMeshes(): THREE.Points[] {
         return Array.from(this.meshes.values());
+    }
+
+    public setVisible(visible: boolean): void {
+        this.meshes.forEach(mesh => { mesh.visible = visible; });
     }
 
     public getSatelliteId(category: string, index: number): string | null {

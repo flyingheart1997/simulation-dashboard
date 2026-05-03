@@ -27,6 +27,10 @@ When a satellite is clicked or hovered, a high-fidelity 3D model (built from pri
 
 The dashboard is built with Preact and sits above the Three.js canvas.
 
+## Future 2D Map Upgrade
+
+The current stable 2D map path uses local equirectangular textures so 2D and 3D remain reliable online and offline. A future zoom-perfect map design upgrade should not stretch WebMercator tiles onto this plane. Use the projection-correct MapLibre + simulation overlay plan documented in [map-rendering-upgrade.md](./map-rendering-upgrade.md).
+
 ### The Throttle Mechanism
 The dashboard calls `simulationStore.subscribe(() => this.forceUpdate())`. 
 Because the physics update loop (`update()`) runs constantly to advance time, triggering a React/Preact update every frame would destroy performance.

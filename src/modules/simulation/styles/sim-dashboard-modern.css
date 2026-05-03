@@ -1726,9 +1726,8 @@ input:checked + .sim-slider:before {
   position: relative;
 }
 
-.map-preview.night { background-image: url('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg'); background-size: cover; }
-.map-preview.dark { background-image: url('https://unpkg.com/three-globe/example/img/earth-dark.jpg'); background-size: cover; border-color: rgba(0, 255, 255, 0.2); }
-.map-preview.white { background-image: url('https://unpkg.com/three-globe/example/img/earth-topology.png'); background-size: cover; background-color: #f0f7ff; border-color: #a0c4ff; }
+.map-preview.dark { background-image: url('/textures/earth-dark.png'); background-size: cover; filter: brightness(1.08) saturate(1.12); border-color: rgba(0, 255, 255, 0.2); }
+.map-preview.satellite { background-image: url('/textures/earth-light.jpg'); background-size: cover; filter: brightness(1.02) saturate(1.08); border-color: rgba(0, 255, 136, 0.24); }
 
 .map-preview-overlay {
   position: absolute;
@@ -1811,6 +1810,17 @@ input:checked + .sim-slider:before {
   gap: 15px;
 }
 
+.sim-workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.sim-workspace-grid .sim-view-btn {
+  min-height: 34px;
+  border: 1px solid var(--sim-border);
+}
+
 .sim-setting-group .sim-toggle-row {
   background: rgba(0, 20, 40, 0.3);
   padding: 10px 12px;
@@ -1823,4 +1833,3 @@ input:checked + .sim-slider:before {
   border-color: var(--sim-border);
   background: rgba(0, 20, 40, 0.5);
 }
-

@@ -6,6 +6,7 @@ export interface TleData {
 }
 
 export interface KeplerParams {
+    id?: string;
     name: string;
     altitude: number;
     inclination: number;
@@ -15,6 +16,8 @@ export interface KeplerParams {
     TA: number;
     startTime: number;
     endTime?: number;
+    category?: string;
+    noradId?: string;
 }
 
 export interface SatellitePosition {
@@ -92,6 +95,69 @@ export interface PredictedPass {
     maxElevation: number;
 }
 
+export type WorkspaceInteractionMode =
+    | 'inspect'
+    | 'create-ground-station'
+    | 'create-ground-target'
+    | 'draw-polygon'
+    | 'edit-polygon';
+
+export interface GroundTarget {
+    id: string;
+    name: string;
+    lat: number;
+    lon: number;
+    isSelected: boolean;
+    isHovered: boolean;
+}
+
+export interface EditablePolygon {
+    id: string;
+    name: string;
+    region?: string;
+    description?: string;
+    classification?: string;
+    points: { lat: number; lon: number }[];
+    isClosed: boolean;
+    isSelected: boolean;
+    isHovered: boolean;
+}
+
+export const DEFAULT_AREAS_OF_INTEREST: EditablePolygon[] = [
+    {
+        id: 'AOI-INDIAN-OCEAN-01',
+        name: 'Indian Ocean Watch Box',
+        region: 'Central Indian Ocean',
+        description: 'Demo maritime AOI for downlink visibility and pass inspection.',
+        classification: 'MONITORING',
+        points: [
+            { lat: 6.5, lon: 58.0 },
+            { lat: 6.5, lon: 78.0 },
+            { lat: -9.5, lon: 78.0 },
+            { lat: -9.5, lon: 58.0 }
+        ],
+        isClosed: true,
+        isSelected: false,
+        isHovered: false
+    },
+    {
+        id: 'AOI-SOUTH-ATLANTIC-01',
+        name: 'South Atlantic Calibration Zone',
+        region: 'South Atlantic',
+        description: 'Demo observation AOI used for geometry, hover, and rendering validation.',
+        classification: 'CALIBRATION',
+        points: [
+            { lat: -12.0, lon: -38.0 },
+            { lat: -12.0, lon: -18.0 },
+            { lat: -27.0, lon: -18.0 },
+            { lat: -27.0, lon: -38.0 }
+        ],
+        isClosed: true,
+        isSelected: false,
+        isHovered: false
+    }
+];
+
 export const DEFAULT_GROUND_STATIONS: GroundStation[] = [
     { id: 'GS-01', name: 'Svalbard', lat: 78.23, lon: 15.40, country: 'Norway', countryCode: 'NOR', agency: 'KSAT', type: 'commercial', status: 'active', established: 1997, elevation: 458, minElevation: 5, antennas: 31, isSelected: false, isHovered: false, history: [] },
     { id: 'GS-02', name: 'Troll Satellite Station', lat: -72.01, lon: 2.53, country: 'Norway', countryCode: 'NOR', agency: 'KSAT', type: 'research', status: 'active', established: 2010, elevation: 1270, minElevation: 10, antennas: 4, isSelected: false, isHovered: false, history: [] },
@@ -123,6 +189,14 @@ export const DEFAULT_GROUND_STATIONS: GroundStation[] = [
 export interface SimulationState {
     satellites: Map<string, SimulatedSatellite>;
     groundStations: GroundStation[];
+    groundTargets: GroundTarget[];
+    polygons: EditablePolygon[];
+    workspaceMode: WorkspaceInteractionMode;
+    draftPolygonId: string | null;
+    selectedGroundTargetId: string | null;
+    hoveredGroundTargetId: string | null;
+    selectedPolygonId: string | null;
+    hoveredPolygonId: string | null;
     selectedGroundStationId: string | null;
     hoveredGroundStationId: string | null;
     gsTooltipPos: { x: number, y: number } | null;
@@ -142,7 +216,7 @@ export interface SimulationState {
     loadingContext: 'init';
     tooltipPos: { x: number, y: number } | null;
     visibleLayers: string[];
-    selectedMap: 'night' | 'dark' | 'white';
+    selectedMap: MapType;
     showDayNightLayer: boolean;
     showVisibilityCones: boolean;
     showGSNCoverage: boolean;
@@ -152,4 +226,4 @@ export interface SimulationState {
 }
 
 export type DashboardType = 'simulation' | 'summary' | 'operate';
-export type MapType = 'night' | 'dark' | 'white';
+export type MapType = 'dark' | 'satellite';
