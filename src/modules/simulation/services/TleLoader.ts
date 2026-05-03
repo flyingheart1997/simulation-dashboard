@@ -1,4 +1,4 @@
-import { TleData } from '../types/types';
+import { TleData } from '../types';
 
 // In-memory cache: { countryCode -> { tles, timestamp } }
 const tleCache = new Map<string, { tles: TleData[]; fetchedAt: number }>();

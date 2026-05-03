@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GroundStation, SimulatedSatellite } from '../types/types';
+import { GroundStation, SimulatedSatellite } from '../types';
 import { simulationStore } from '../stores/simulationStore';
 import { latLonToVector3 } from '../utils/coordUtils';
 import { findBestVisibleSatellite } from '../utils/visibilityUtils';

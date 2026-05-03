@@ -2,7 +2,7 @@ import maplibregl, { Map as MapLibreMap } from 'maplibre-gl';
 import * as THREE from 'three';
 import { Protocol } from 'pmtiles';
 import type { StyleSpecification } from 'maplibre-gl';
-import type { MapType } from '../types/types';
+import type { MapType } from '../types';
 import type { FlatMapBounds, LatLon } from '../utils/mapProjection';
 import { getConfiguredMapLibreStyleUrl, getMapboxRasterTileTemplate, getPublicMapboxToken } from '../utils/mapSourceConfig';
 

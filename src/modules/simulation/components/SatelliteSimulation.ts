@@ -6,7 +6,7 @@ import { SatelliteInstancedMesh } from './SatelliteInstancedMesh';
 import { GroundStationLayer } from './GroundStationMesh';
 import { FlatMapLayer } from './FlatMapLayer';
 import { MapLibreBaseLayer } from './MapLibreBaseLayer';
-import type { EditablePolygon, SimulatedSatellite } from '../types/types';
+import type { EditablePolygon, SimulatedSatellite } from '../types';
 import { simulationStore } from '../stores/simulationStore';
 import { getSunPosition } from '../utils/sunUtils';
 import { getSatelliteColor } from '../utils/satelliteUtils';

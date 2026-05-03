@@ -1,4 +1,4 @@
-import type { MapType } from '../types/types';
+import type { MapType } from '../types';
 
 export interface SimulationDataLayerStyle {
     id: string;

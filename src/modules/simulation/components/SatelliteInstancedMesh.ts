@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SimulatedSatellite } from '../types/types';
+import { SimulatedSatellite } from '../types';
 import { getSatelliteColor } from '../utils/satelliteUtils';
 
 export class SatelliteInstancedMesh {

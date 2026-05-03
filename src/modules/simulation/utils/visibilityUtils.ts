@@ -1,4 +1,4 @@
-import { GroundStation, SatellitePosition, SimulatedSatellite } from '../types/types';
+import { GroundStation, SatellitePosition, SimulatedSatellite } from '../types';
 
 export interface LatLonPoint {
     lat: number;

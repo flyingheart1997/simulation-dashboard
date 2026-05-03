@@ -2,7 +2,7 @@ import { h, render } from 'preact';
 import { SimulationDashboard } from './SimulationDashboard';
 import { SatelliteSimulation } from './SatelliteSimulation';
 import { simulationStore } from '../stores/simulationStore';
-import type { MapType } from '../types/types';
+import type { MapType } from '../types';
 
 interface SimulationShowOptions {
     onlineMap?: boolean;
