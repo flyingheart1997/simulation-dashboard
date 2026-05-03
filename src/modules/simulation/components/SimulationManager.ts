@@ -3,6 +3,10 @@ import { SimulationDashboard } from './SimulationDashboard';
 import { SatelliteSimulation } from './SatelliteSimulation';
 import { simulationStore } from '../stores/simulationStore';
 
+interface SimulationShowOptions {
+    onlineMap?: boolean;
+}
+
 export class SimulationManager {
     private container: HTMLElement | null = null;
     private dashboardRoot: HTMLElement | null = null;
@@ -18,7 +22,7 @@ export class SimulationManager {
         }
     }
 
-    public async show(parent: HTMLElement, onExit?: () => void): Promise<void> {
+    public async show(parent: HTMLElement, onExit?: () => void, options: SimulationShowOptions = {}): Promise<void> {
         if (this.isActive) return;
 
         this.onExitCallback = onExit || null;
@@ -46,7 +50,7 @@ export class SimulationManager {
         this.container.appendChild(this.dashboardRoot);
 
         // Initialize 3D Simulation
-        this.simulation = new SatelliteSimulation(sceneContainer);
+        this.simulation = new SatelliteSimulation(sceneContainer, options.onlineMap ?? false);
 
         // Initialize Store and Fetch Data
         render(h(SimulationDashboard, {}), this.dashboardRoot);

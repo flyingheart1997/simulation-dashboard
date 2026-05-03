@@ -10,13 +10,15 @@ interface OriginalSimulationProps {
     groundStations?: ManualGroundStation[];
     dashboardType?: DashboardType;
     currentTime?: number;
+    onlineMap?: boolean;
 }
 
 export const OriginalSimulation: React.FC<OriginalSimulationProps> = ({
     satellites = [],
     groundStations = [],
     dashboardType = 'simulation',
-    currentTime
+    currentTime,
+    onlineMap = false
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [isMounted, setIsMounted] = useState(false);
@@ -33,13 +35,13 @@ export const OriginalSimulation: React.FC<OriginalSimulationProps> = ({
                 simulationStore.seedManualData(satellites, groundStations);
             }
             simulationStore.setDashboardType(dashboardType);
-            simulationView.show(containerRef.current);
+            simulationView.show(containerRef.current, undefined, { onlineMap });
         }
 
         return () => {
             simulationView.hide();
         };
-    }, [isMounted, satellites, groundStations, dashboardType]);
+    }, [isMounted, satellites, groundStations, dashboardType, onlineMap]);
 
     useEffect(() => {
         if (currentTime !== undefined) {
