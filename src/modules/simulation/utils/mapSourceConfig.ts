@@ -1,4 +1,4 @@
-import type { MapType } from '../types/types';
+import type { MapType } from '../types';
 
 export const MAPBOX_STYLE_IDS: Record<MapType, string> = {
     dark: 'dark-v11',

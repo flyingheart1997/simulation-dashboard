@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SatelliteInstancedMesh } from './SatelliteInstancedMesh';
-import { EditablePolygon, GroundStation, GroundTarget, SimulatedSatellite, SimulationState } from '../types/types';
+import { EditablePolygon, GroundStation, GroundTarget, SimulatedSatellite, SimulationState } from '../types';
 import { FlatMapBounds, flatVectorToLatLon, latLonToFlatVector3 } from '../utils/mapProjection';
 import { buildCoverageFootprint, findBestVisibleSatellite } from '../utils/visibilityUtils';
 import { getSatelliteColor } from '../utils/satelliteUtils';

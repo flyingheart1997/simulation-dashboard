@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { MapType } from '../types/types';
+import type { MapType } from '../types';
 import { latLonToVector3 } from '../utils/coordUtils';
 import {
     getConfiguredMapLibreStyleUrl,

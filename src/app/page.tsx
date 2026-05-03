@@ -1,5 +1,5 @@
 import { OriginalSimulation } from "@/modules/simulation/components/OriginalSimulation";
-import { ManualGroundStation } from "@/modules/simulation/types/types";
+import { ManualGroundStation } from "@/modules/simulation/types";
 
 const DEMO_START_TIME = Date.now();
 const SATELLITE_CATEGORIES = ['operational', 'communication', 'weather', 'gps'];
@@ -37,7 +37,7 @@ export default function Home() {
                 satellites={MOCK_SATELLITES}
                 groundStations={MOCK_GROUND_STATIONS}
                 dashboardType='simulation'
-                onlineMap={false}
+                onlineMap={true}
                 editMode={false}
                 mapType='light'
                 viewType='3D'
