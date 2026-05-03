@@ -1,12 +1,12 @@
-import * as THREE from 'three';
 import { TleLoader } from '../services/TleLoader';
 import { OrbitPropagator } from '../services/OrbitPropagator';
 import { KeplerPropagator } from '../services/KeplerPropagator';
 import {
     SimulationState, TleData, GroundStation, DEFAULT_GROUND_STATIONS, SimulatedSatellite,
-    KeplerParams, PredictedPass, DashboardType
+    KeplerParams, PredictedPass, DashboardType, WorkspaceInteractionMode, GroundTarget,
+    EditablePolygon, MapType, DEFAULT_AREAS_OF_INTEREST
 } from '../modules/types';
-import { latLonToVector3, calculateElevation } from '../utils/coordUtils';
+import { calculateElevation } from '../utils/coordUtils';
 
 class SimulationStore {
     private state: SimulationState = {
@@ -30,8 +30,21 @@ class SimulationStore {
         selectedGroundStationId: null,
         hoveredGroundStationId: null,
         gsTooltipPos: null,
+        groundTargets: [],
+        polygons: DEFAULT_AREAS_OF_INTEREST.map(poly => ({
+            ...poly,
+            points: poly.points.map(point => ({ ...point })),
+            isSelected: false,
+            isHovered: false
+        })),
+        workspaceMode: 'inspect',
+        draftPolygonId: null,
+        selectedGroundTargetId: null,
+        hoveredGroundTargetId: null,
+        selectedPolygonId: null,
+        hoveredPolygonId: null,
         visibleLayers: [],
-        selectedMap: 'night',
+        selectedMap: 'dark',
         showDayNightLayer: true,
         showVisibilityCones: true,
         showGSNCoverage: true,
@@ -161,16 +174,16 @@ class SimulationStore {
         this.state.groundStations = mappedGs;
 
         satellites.forEach((sat, index) => {
-            const id = (sat as any).id || `sat-${index}`;
+            const id = sat.id || `sat-${index}`;
             const propagator = new KeplerPropagator(sat);
             const initialPos = propagator.propagate(this.state.simulationTime);
             if (initialPos) {
                 this.propagators.set(id, propagator);
                 this.state.satellites.set(id, {
                     id,
-                    noradId: (sat as any).noradId || '00000',
+                    noradId: sat.noradId || '00000',
                     name: sat.name,
-                    category: (sat as any).category || 'operational',
+                    category: sat.category || 'operational',
                     line1: '',
                     line2: '',
                     position: initialPos,
@@ -183,31 +196,279 @@ class SimulationStore {
             }
         });
 
+        this.notify(true);
+    }
+
+    setWorkspaceMode(mode: WorkspaceInteractionMode) {
+        this.state.workspaceMode = mode;
+        this.clearTransientInspectionState();
+        if (mode !== 'inspect') {
+            this.state.viewMode = '2d';
+            if (this.state.selectedSatelliteId) {
+                const sat = this.state.satellites.get(this.state.selectedSatelliteId);
+                if (sat) sat.isSelected = false;
+            }
+            if (this.state.selectedGroundStationId) {
+                const gs = this.state.groundStations.find(g => g.id === this.state.selectedGroundStationId);
+                if (gs) gs.isSelected = false;
+            }
+            this.state.selectedSatelliteId = null;
+            this.state.selectedGroundStationId = null;
+        }
+        if (mode !== 'draw-polygon') this.discardDraftPolygon();
+        this.notify(true);
+    }
+
+    createGroundStationAt(lat: number, lon: number): GroundStation {
+        const station: GroundStation = {
+            id: `GS-DRAFT-${this.state.groundStations.length + 1}`,
+            name: `Ground Station ${this.state.groundStations.length + 1}`,
+            lat,
+            lon,
+            country: '',
+            countryCode: '',
+            agency: 'DRAFT',
+            type: 'research',
+            status: 'active',
+            minElevation: 10,
+            isSelected: false,
+            isHovered: false,
+            history: [],
+            predictedPasses: []
+        };
+
+        this.state.groundStations = [...this.state.groundStations, station];
+        this.selectGroundStation(station.id);
+        return station;
+    }
+
+    moveGroundStation(id: string, lat: number, lon: number) {
+        const station = this.state.groundStations.find(gs => gs.id === id);
+        if (!station) return;
+        station.lat = lat;
+        station.lon = lon;
+        this.state.selectedGroundStationId = id;
+        this.state.selectedSatelliteId = null;
+        this.state.selectedGroundTargetId = null;
+        this.state.selectedPolygonId = null;
+        this.state.groundStations.forEach(gs => { gs.isSelected = gs.id === id; });
+        this.notify(true);
+    }
+
+    createGroundTargetAt(lat: number, lon: number): GroundTarget {
+        const target: GroundTarget = {
+            id: `GT-DRAFT-${this.state.groundTargets.length + 1}`,
+            name: `Ground Target ${this.state.groundTargets.length + 1}`,
+            lat,
+            lon,
+            isSelected: true,
+            isHovered: false
+        };
+
+        this.state.groundTargets.forEach(gt => { gt.isSelected = false; });
+        this.state.groundTargets = [...this.state.groundTargets, target];
+        this.state.selectedGroundTargetId = target.id;
+        this.state.selectedGroundStationId = null;
+        this.state.selectedSatelliteId = null;
+        this.notify(true);
+        return target;
+    }
+
+    moveGroundTarget(id: string, lat: number, lon: number) {
+        const target = this.state.groundTargets.find(gt => gt.id === id);
+        if (!target) return;
+        target.lat = lat;
+        target.lon = lon;
+        this.state.selectedGroundTargetId = id;
+        this.state.selectedGroundStationId = null;
+        this.state.selectedSatelliteId = null;
+        this.state.selectedPolygonId = null;
+        this.state.groundTargets.forEach(gt => { gt.isSelected = gt.id === id; });
         this.notify();
+    }
+
+    selectGroundTarget(id: string | null) {
+        if (this.state.selectedGroundTargetId === id) return;
+        this.state.groundTargets.forEach(target => {
+            target.isSelected = target.id === id;
+        });
+        this.state.selectedGroundTargetId = id;
+        if (id) {
+            this.state.selectedGroundStationId = null;
+            this.state.selectedSatelliteId = null;
+            this.state.selectedPolygonId = null;
+        }
+        this.notify(true);
+    }
+
+    hoverGroundTarget(id: string | null) {
+        if (this.state.hoveredGroundTargetId === id) return;
+        this.state.groundTargets.forEach(target => {
+            target.isHovered = target.id === id;
+        });
+        this.state.hoveredGroundTargetId = id;
+        this.notify();
+    }
+
+    addPolygonPoint(lat: number, lon: number): EditablePolygon {
+        let polygon = this.state.draftPolygonId
+            ? this.state.polygons.find(p => p.id === this.state.draftPolygonId)
+            : null;
+
+        if (!polygon) {
+            polygon = {
+                id: `AOI-DRAFT-${this.state.polygons.length + 1}`,
+                name: `Area ${this.state.polygons.length + 1}`,
+                region: 'User defined',
+                description: 'Draft area of interest',
+                classification: 'DRAFT',
+                points: [],
+                isClosed: false,
+                isSelected: true,
+                isHovered: false
+            };
+            this.state.polygons.forEach(poly => { poly.isSelected = false; });
+            this.state.polygons = [...this.state.polygons, polygon];
+            this.state.draftPolygonId = polygon.id;
+            this.state.selectedPolygonId = polygon.id;
+            this.state.selectedGroundStationId = null;
+            this.state.selectedSatelliteId = null;
+            this.state.selectedGroundTargetId = null;
+        }
+
+        const isDuplicatePoint = polygon.points.some(point =>
+            Math.abs(point.lat - lat) < 0.0001
+            && Math.abs(point.lon - lon) < 0.0001
+        );
+
+        if (!isDuplicatePoint) {
+            polygon.points = [...polygon.points, { lat, lon }];
+        }
+        this.notify(true);
+        return polygon;
+    }
+
+    finishDraftPolygon() {
+        if (!this.state.draftPolygonId) return;
+        const polygon = this.state.polygons.find(p => p.id === this.state.draftPolygonId);
+        if (polygon && polygon.points.length >= 3) {
+            polygon.isClosed = true;
+            polygon.isSelected = true;
+            this.state.selectedPolygonId = polygon.id;
+            this.state.draftPolygonId = null;
+            this.state.workspaceMode = 'edit-polygon';
+        } else {
+            this.discardDraftPolygon();
+        }
+        this.notify(true);
+    }
+
+    movePolygonByDelta(id: string, deltaLat: number, deltaLon: number) {
+        const polygon = this.state.polygons.find(p => p.id === id);
+        if (!polygon || !polygon.isClosed) return;
+        polygon.points = polygon.points.map(point => ({
+            lat: Math.max(-90, Math.min(90, point.lat + deltaLat)),
+            lon: this.normalizeLongitude(point.lon + deltaLon)
+        }));
+        this.state.polygons.forEach(poly => { poly.isSelected = poly.id === id; });
+        this.state.selectedPolygonId = id;
+        this.state.selectedGroundTargetId = null;
+        this.state.selectedGroundStationId = null;
+        this.state.selectedSatelliteId = null;
+        this.notify();
+    }
+
+    selectPolygon(id: string | null) {
+        if (this.state.selectedPolygonId === id) return;
+        this.state.polygons.forEach(poly => {
+            poly.isSelected = poly.id === id;
+        });
+        this.state.selectedPolygonId = id;
+        if (id) {
+            this.state.selectedGroundTargetId = null;
+            this.state.selectedGroundStationId = null;
+            this.state.selectedSatelliteId = null;
+        }
+        this.notify(true);
+    }
+
+    hoverPolygon(id: string | null) {
+        if (this.state.hoveredPolygonId === id) return;
+        this.state.polygons.forEach(poly => {
+            poly.isHovered = poly.id === id;
+        });
+        this.state.hoveredPolygonId = id;
+        this.notify();
+    }
+
+    private normalizeLongitude(lon: number): number {
+        let normalized = lon;
+        while (normalized <= -180) normalized += 360;
+        while (normalized > 180) normalized -= 360;
+        return normalized;
+    }
+
+    private clearTransientInspectionState() {
+        if (this.state.hoveredSatelliteId) {
+            const sat = this.state.satellites.get(this.state.hoveredSatelliteId);
+            if (sat) sat.isHovered = false;
+        }
+        if (this.state.hoveredGroundStationId) {
+            const gs = this.state.groundStations.find(g => g.id === this.state.hoveredGroundStationId);
+            if (gs) gs.isHovered = false;
+        }
+        this.state.groundTargets.forEach(target => { target.isHovered = false; });
+        this.state.polygons.forEach(poly => { poly.isHovered = false; });
+        this.state.hoveredSatelliteId = null;
+        this.state.hoveredGroundStationId = null;
+        this.state.hoveredGroundTargetId = null;
+        this.state.hoveredPolygonId = null;
+        this.state.tooltipPos = null;
+        this.state.gsTooltipPos = null;
+    }
+
+    private discardDraftPolygon() {
+        if (!this.state.draftPolygonId) return;
+        const draftId = this.state.draftPolygonId;
+        this.state.polygons = this.state.polygons.filter(poly => poly.id !== draftId || poly.isClosed);
+        if (this.state.selectedPolygonId === draftId) this.state.selectedPolygonId = null;
+        if (this.state.hoveredPolygonId === draftId) this.state.hoveredPolygonId = null;
+        this.state.draftPolygonId = null;
     }
 
     private calculateNextTime(dtMs: number): Date {
         const dtSeconds = (dtMs / 1000) * this.state.speed;
         const nextTimeMs = this.state.simulationTime.getTime() + dtSeconds * 1000;
 
-        // Find global simulation boundaries
-        let minStart = Infinity;
-        let maxEnd = -Infinity;
+        let minStart: number | null = null;
+        let maxFiniteEnd: number | null = null;
+        let hasOpenEndedOrbit = false;
 
         this.state.satellites.forEach(sat => {
-            if (sat.orbitStartTime) minStart = Math.min(minStart, sat.orbitStartTime);
-            if (sat.orbitEndTime) maxEnd = Math.max(maxEnd, sat.orbitEndTime);
+            if (Number.isFinite(sat.orbitStartTime)) {
+                minStart = minStart === null ? sat.orbitStartTime : Math.min(minStart, sat.orbitStartTime);
+            }
+
+            if (typeof sat.orbitEndTime === 'number' && Number.isFinite(sat.orbitEndTime)) {
+                maxFiniteEnd = maxFiniteEnd === null ? sat.orbitEndTime : Math.max(maxFiniteEnd, sat.orbitEndTime);
+            } else {
+                hasOpenEndedOrbit = true;
+            }
         });
 
-        // Clamp and auto-pause at boundaries
         if (this.state.speed > 0) {
-            if (this.state.dashboardType === 'simulation' && nextTimeMs >= maxEnd) {
+            if (
+                this.state.dashboardType === 'simulation' &&
+                !hasOpenEndedOrbit &&
+                maxFiniteEnd !== null &&
+                nextTimeMs >= maxFiniteEnd
+            ) {
                 this.state.isPlaying = false;
                 this.state.speed = 0;
-                return new Date(maxEnd);
+                return new Date(maxFiniteEnd);
             }
         } else if (this.state.speed < 0) {
-            if (nextTimeMs <= minStart) {
+            if (minStart !== null && nextTimeMs <= minStart) {
                 this.state.isPlaying = false;
                 this.state.speed = 0;
                 return new Date(minStart);
@@ -355,6 +616,11 @@ class SimulationStore {
         }
         this.state.selectedGroundStationId = id;
         if (id) {
+            this.state.selectedSatelliteId = null;
+            this.state.selectedGroundTargetId = null;
+            this.state.selectedPolygonId = null;
+            this.state.groundTargets.forEach(target => { target.isSelected = false; });
+            this.state.polygons.forEach(poly => { poly.isSelected = false; });
             const gs = this.state.groundStations.find(g => g.id === id);
             if (gs) {
                 gs.isSelected = true;
@@ -464,7 +730,7 @@ class SimulationStore {
         this.notify();
     }
 
-    setMap(mapType: 'night' | 'dark' | 'white') {
+    setMap(mapType: MapType) {
         this.state.selectedMap = mapType;
         this.notify();
     }
@@ -491,7 +757,12 @@ class SimulationStore {
 
     setViewMode(mode: '2d' | '3d') {
         this.state.viewMode = mode;
-        this.notify();
+        if (mode === '3d' && this.state.workspaceMode !== 'inspect') {
+            this.discardDraftPolygon();
+            this.state.workspaceMode = 'inspect';
+            this.clearTransientInspectionState();
+        }
+        this.notify(true);
     }
 
 

@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GroundStation, SimulatedSatellite } from '../modules/types';
 import { simulationStore } from '../stores/simulationStore';
 import { latLonToVector3 } from '../utils/coordUtils';
+import { findBestVisibleSatellite } from '../utils/visibilityUtils';
 
 /**
  * Creates a modern, premium canvas texture for the ground station icon.
@@ -198,6 +199,13 @@ export class GroundStationLayer {
         });
     }
 
+    setVisible(visible: boolean): void {
+        this.iconGroup.visible = visible;
+        this.commLines.forEach(line => {
+            line.visible = visible && line.visible;
+        });
+    }
+
     tick(selectedGsId: string | null = null, satPositions?: Map<string, THREE.Vector3>): void {
         const state = simulationStore.getState();
         const selectedId = selectedGsId || state.selectedGroundStationId;
@@ -240,7 +248,7 @@ export class GroundStationLayer {
     }
 
     private updateCommLines(state: any, satPositions?: Map<string, THREE.Vector3>): void {
-        if (!state.showCommLinks) {
+        if (!state.showCommLinks || state.workspaceMode !== 'inspect') {
             this.commLines.forEach(line => line.visible = false);
             return;
         }
@@ -252,38 +260,20 @@ export class GroundStationLayer {
         }
  
         const selectedGsId = state.selectedGroundStationId as string | null;
+        const selectedSatId = state.selectedSatelliteId as string | null;
         const activeGsIds = new Set<string>();
+        const satellites = Array.from(satelliteMap.values());
  
         for (const gs of this.groundStations) {
             // Comm lines start from surface height (35km for visibility)
             const gsPos = latLonToVector3(gs.lat, gs.lon, 35);
-            const gsVec = gsPos.clone().normalize().multiplyScalar(GroundStationLayer.RADIUS);
-            const minElev = gs.minElevation || 10;
- 
-            let bestSatPos: THREE.Vector3 | null = null;
-            let maxElev = -90;
- 
-            if (satPositions) {
-                for (const [id, satPos] of satPositions.entries()) {
-                    const distSq = gsVec.distanceToSquared(satPos);
-                    if (distSq > 15000 * 15000) continue; // Prune distant satellites
- 
-                    const rangeVec = satPos.clone().sub(gsVec);
-                    const upVec = gsVec.clone().normalize();
-                    const dot = rangeVec.normalize().dot(upVec);
-                    const elev = Math.asin(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI;
- 
-                    if (elev > minElev && elev > maxElev) {
-                        maxElev = elev;
-                        bestSatPos = satPos;
-                    }
-                }
-            }
+            const bestLink = findBestVisibleSatellite(gs, satellites);
+            const bestSatPos = bestLink ? satPositions?.get(bestLink.satellite.id) : null;
  
             if (bestSatPos) {
                 const satPos = bestSatPos;
                 activeGsIds.add(gs.id);
-                const isSelected = gs.id === selectedGsId;
+                const isSelected = gs.id === selectedGsId || bestLink?.satellite.id === selectedSatId;
  
                 let line = this.commLines.get(gs.id);
                 

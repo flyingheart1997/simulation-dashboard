@@ -3,18 +3,21 @@ import { SimulatedSatellite } from '../modules/types';
 import { getSatelliteColor } from '../utils/satelliteUtils';
 
 export class SatelliteInstancedMesh {
+    private readonly categories = ['starlink', 'gps', 'weather', 'communication', 'operational', 'default'];
     private meshes: Map<string, THREE.Points> = new Map();
     private geometries: Map<string, THREE.BufferGeometry> = new Map();
     private positionBuffers: Map<string, Float32Array> = new Map();
     private colorBuffers: Map<string, Float32Array> = new Map();
+    private categoryIds: Map<string, string[]> = new Map();
+    private textures: Map<string, THREE.Texture> = new Map();
     private maxCount: number;
-    private scene: THREE.Scene;
+    private scene: THREE.Object3D;
 
-    constructor(scene: THREE.Scene, initialCount: number = 0) {
+    constructor(scene: THREE.Object3D, initialCount: number = 0) {
         this.scene = scene;
         this.maxCount = Math.max(initialCount, 15000);
 
-        ['starlink', 'gps', 'weather', 'communication', 'operational', 'default'].forEach(cat => {
+        this.categories.forEach(cat => {
             this.initCategoryMesh(cat);
         });
     }
@@ -28,6 +31,7 @@ export class SatelliteInstancedMesh {
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
         const texture = this.createIconTexture(category);
+        this.textures.set(category, texture);
 
         const material = new THREE.PointsMaterial({
             size: 20,
@@ -48,6 +52,7 @@ export class SatelliteInstancedMesh {
         this.geometries.set(category, geometry);
         this.positionBuffers.set(category, positions);
         this.colorBuffers.set(category, colors);
+        this.categoryIds.set(category, []);
         this.meshes.set(category, mesh);
         this.scene.add(mesh);
     }
@@ -117,45 +122,66 @@ export class SatelliteInstancedMesh {
     }
 
     updatePositions(satellites: Map<string, SimulatedSatellite>, cartesianPositions: Map<string, THREE.Vector3>) {
-        const categoryGroups = new Map<string, SimulatedSatellite[]>();
+        const categoryCounts = new Map<string, number>();
+        this.categories.forEach(cat => categoryCounts.set(cat, 0));
+
         for (const sat of satellites.values()) {
-            const cat = (sat.category || 'default').toLowerCase();
-            const list = categoryGroups.get(cat) || [];
-            list.push(sat);
-            categoryGroups.set(cat, list);
-        }
+            const rawCategory = (sat.category || 'default').toLowerCase();
+            const category = this.geometries.has(rawCategory) ? rawCategory : 'default';
+            const index = categoryCounts.get(category) || 0;
+            if (index >= this.maxCount) continue;
 
-        this.geometries.forEach((geo, cat) => {
-            const sats = categoryGroups.get(cat) || [];
-            const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
-            const colAttr = geo.getAttribute('color') as THREE.BufferAttribute;
+            const positions = this.positionBuffers.get(category);
+            const colors = this.colorBuffers.get(category);
+            const ids = this.categoryIds.get(category);
+            if (!positions || !colors || !ids) continue;
 
-            for (let i = 0; i < sats.length; i++) {
-                const sat = sats[i];
-                const pos = cartesianPositions.get(sat.id);
-                
-                if (pos) {
-                    posAttr.setXYZ(i, pos.x, pos.y, pos.z);
-                } else {
-                    // Fallback to zero if position not found (shouldn't happen with unified cache)
-                    posAttr.setXYZ(i, 0, 0, 0);
-                }
+            const pos = cartesianPositions.get(sat.id);
+            const offset = index * 3;
 
-                const color = getSatelliteColor(sat.category, sat.id);
-                if (sat.isSelected) color.setHex(0xffffff);
-                else if (sat.isHovered) color.addScalar(0.2);
-
-                colAttr.setXYZ(i, color.r, color.g, color.b);
+            if (pos) {
+                positions[offset] = pos.x;
+                positions[offset + 1] = pos.y;
+                positions[offset + 2] = pos.z;
+            } else {
+                positions[offset] = 0;
+                positions[offset + 1] = 0;
+                positions[offset + 2] = 0;
             }
 
+            const color = getSatelliteColor(sat.category, sat.id);
+            if (sat.isSelected) color.setHex(0xffffff);
+            else if (sat.isHovered) color.addScalar(0.2);
+
+            colors[offset] = color.r;
+            colors[offset + 1] = color.g;
+            colors[offset + 2] = color.b;
+            ids[index] = sat.id;
+            categoryCounts.set(category, index + 1);
+        }
+
+        this.geometries.forEach((geo, category) => {
+            const count = categoryCounts.get(category) || 0;
+            const posAttr = geo.getAttribute('position') as THREE.BufferAttribute;
+            const colAttr = geo.getAttribute('color') as THREE.BufferAttribute;
             posAttr.needsUpdate = true;
             colAttr.needsUpdate = true;
-            geo.setDrawRange(0, sats.length);
+            geo.setDrawRange(0, count);
+            const ids = this.categoryIds.get(category);
+            if (ids) ids.length = count;
         });
     }
 
     public getMeshes(): THREE.Points[] {
         return Array.from(this.meshes.values());
+    }
+
+    public setVisible(visible: boolean): void {
+        this.meshes.forEach(mesh => { mesh.visible = visible; });
+    }
+
+    public getSatelliteId(category: string, index: number): string | null {
+        return this.categoryIds.get(category)?.[index] || null;
     }
 
     destroy() {
@@ -164,5 +190,6 @@ export class SatelliteInstancedMesh {
             (m.material as THREE.Material).dispose();
             this.scene.remove(m);
         });
+        this.textures.forEach(texture => texture.dispose());
     }
 }

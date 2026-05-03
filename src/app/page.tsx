@@ -1,25 +1,26 @@
 import { OriginalSimulation } from "@/modules/simulation/components/OriginalSimulation";
 import { ManualGroundStation } from "@/modules/simulation/modules/types";
 
-const MOCK_SATELLITES = Array.from({ length: 100 }).map((_, i) => {
-    const planeIdx = Math.floor(i / 10);
-    const satIdxInPlane = i % 10;
+const DEMO_START_TIME = Date.now();
+const SATELLITE_CATEGORIES = ['operational', 'communication', 'weather', 'gps'];
+
+const MOCK_SATELLITES = Array.from({ length: 10 }).map((_, i) => {
+    const planeIdx = Math.floor(i / 2);
+    const satIdxInPlane = i % 2;
+    const openEndedOrbit = i < 2;
     
     return {
         id: `SAT-${i + 1}`,
         name: `ANTARIS-S${i + 1}`,
-        // Distribute across altitudes (LEO range)
         altitude: 400 + (planeIdx * 150), 
-        // Distribute inclinations (0 to 180 degrees)
-        inclination: (planeIdx * 180 / 10), 
+        inclination: 25 + (planeIdx * 18), 
         eccentricity: 0.001,
-        // Evenly space Right Ascension of the Ascending Node (RAAN)
-        RAAN: planeIdx * 36, 
+        RAAN: planeIdx * 48, 
         AP: 0,
-        // Evenly space satellites within each plane
-        TA: satIdxInPlane * 36, 
-        startTime: Date.now(),
-        endTime: Date.now() + 130 * 60 * 1000
+        TA: satIdxInPlane * 180, 
+        startTime: DEMO_START_TIME,
+        category: SATELLITE_CATEGORIES[i % SATELLITE_CATEGORIES.length],
+        ...(openEndedOrbit ? {} : { endTime: DEMO_START_TIME + 130 * 60 * 1000 })
     };
 });
 
