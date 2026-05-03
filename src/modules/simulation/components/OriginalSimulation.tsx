@@ -5,12 +5,18 @@ import { KeplerParams, ManualGroundStation, DashboardType } from '../modules/typ
 import { simulationView } from './SimulationManager';
 import { simulationStore } from '../stores/simulationStore';
 
+export type SimulationMapPreset = 'dark' | 'light';
+export type SimulationViewPreset = '2D' | '3D';
+
 interface OriginalSimulationProps {
     satellites?: KeplerParams[];
     groundStations?: ManualGroundStation[];
     dashboardType?: DashboardType;
     currentTime?: number;
     onlineMap?: boolean;
+    editMode?: boolean;
+    mapType?: SimulationMapPreset;
+    viewType?: SimulationViewPreset;
 }
 
 export const OriginalSimulation: React.FC<OriginalSimulationProps> = ({
@@ -18,7 +24,10 @@ export const OriginalSimulation: React.FC<OriginalSimulationProps> = ({
     groundStations = [],
     dashboardType = 'simulation',
     currentTime,
-    onlineMap = false
+    onlineMap = false,
+    editMode = false,
+    mapType,
+    viewType
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [isMounted, setIsMounted] = useState(false);
@@ -29,19 +38,25 @@ export const OriginalSimulation: React.FC<OriginalSimulationProps> = ({
 
     useEffect(() => {
         if (containerRef.current && isMounted) {
-            // Seed FIRST to prevent init() from fetching API data
-            if (satellites.length > 0 || groundStations.length > 0) {
+            // Seed FIRST to prevent init() from fetching API data.
+            // Edit workspaces may intentionally start without satellites/GS.
+            if (editMode || satellites.length > 0 || groundStations.length > 0) {
                 console.log('[OriginalSimulation] Seeding data');
                 simulationStore.seedManualData(satellites, groundStations);
             }
             simulationStore.setDashboardType(dashboardType);
-            simulationView.show(containerRef.current, undefined, { onlineMap });
+            simulationView.show(containerRef.current, undefined, {
+                onlineMap,
+                editMode,
+                mapType: mapType === 'light' ? 'satellite' : mapType,
+                viewMode: viewType === '2D' ? '2d' : viewType === '3D' ? '3d' : undefined
+            });
         }
 
         return () => {
             simulationView.hide();
         };
-    }, [isMounted, satellites, groundStations, dashboardType, onlineMap]);
+    }, [isMounted, satellites, groundStations, dashboardType, onlineMap, editMode, mapType, viewType]);
 
     useEffect(() => {
         if (currentTime !== undefined) {

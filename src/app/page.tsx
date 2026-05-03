@@ -8,16 +8,16 @@ const MOCK_SATELLITES = Array.from({ length: 10 }).map((_, i) => {
     const planeIdx = Math.floor(i / 2);
     const satIdxInPlane = i % 2;
     const openEndedOrbit = i < 2;
-    
+
     return {
         id: `SAT-${i + 1}`,
         name: `ANTARIS-S${i + 1}`,
-        altitude: 400 + (planeIdx * 150), 
-        inclination: 25 + (planeIdx * 18), 
+        altitude: 400 + (planeIdx * 150),
+        inclination: 25 + (planeIdx * 18),
         eccentricity: 0.001,
-        RAAN: planeIdx * 48, 
+        RAAN: planeIdx * 48,
         AP: 0,
-        TA: satIdxInPlane * 180, 
+        TA: satIdxInPlane * 180,
         startTime: DEMO_START_TIME,
         category: SATELLITE_CATEGORIES[i % SATELLITE_CATEGORIES.length],
         ...(openEndedOrbit ? {} : { endTime: DEMO_START_TIME + 130 * 60 * 1000 })
@@ -38,6 +38,9 @@ export default function Home() {
                 groundStations={MOCK_GROUND_STATIONS}
                 dashboardType='simulation'
                 onlineMap={true}
+                editMode={false}
+                mapType='light'
+                viewType='2D'
             />
         </main>
     );

@@ -91,7 +91,11 @@ export class SatelliteSimulation {
     private static readonly VISIBILITY_REFRESH_MS = 250;
     private static readonly MAX_FLAT_ZOOM = 6;
 
-    constructor(container: HTMLElement, private readonly onlineMapEnabled: boolean) {
+    constructor(
+        container: HTMLElement,
+        private readonly onlineMapEnabled: boolean,
+        private readonly editModeEnabled: boolean
+    ) {
         this.container = container;
         this.scene = new THREE.Scene();
 
@@ -794,7 +798,20 @@ export class SatelliteSimulation {
         const state = simulationStore.getState();
         const is2d = state.viewMode === '2d';
         const sunPos = getSunPosition(state.simulationTime);
-        const mapLibreActive = this.mapLibreBase.setVisible(is2d, state.selectedMap);
+        const editSurfaceActive = this.editModeEnabled || state.workspaceMode !== 'inspect';
+        const effectiveMap = editSurfaceActive ? 'dark' : state.selectedMap;
+        const effectiveState = editSurfaceActive
+            ? {
+                ...state,
+                workspaceMode: (this.editModeEnabled && state.workspaceMode === 'inspect')
+                    ? 'create-ground-station' as const
+                    : state.workspaceMode,
+                selectedMap: effectiveMap,
+                showDayNightLayer: false,
+                visibleLayers: []
+            }
+            : state;
+        const mapLibreActive = this.mapLibreBase.setVisible(is2d, effectiveMap);
         const onlineFlatBasePreferred = is2d && this.onlineMapEnabled;
 
         this.scene.background = (mapLibreActive || onlineFlatBasePreferred) ? null : this.spaceBackground;
@@ -809,7 +826,7 @@ export class SatelliteSimulation {
         this.instancedMesh?.setVisible(!is2d);
         this.groundStationLayer?.setVisible(!is2d);
         this.orbitPathLines.forEach(line => { line.visible = !is2d; });
-        if (state.workspaceMode !== 'inspect') {
+        if (effectiveState.workspaceMode !== 'inspect') {
             this.visibilityCones.forEach(cone => { cone.visible = false; });
             this.gsCoverageMeshes.forEach(mesh => { mesh.visible = false; });
         } else {
@@ -825,7 +842,7 @@ export class SatelliteSimulation {
                 this.flatCamera.zoom = 1;
                 this.flatCamera.updateProjectionMatrix();
             }
-            this.flatMap.update(state, sunPos, this.flatCamera);
+            this.flatMap.update(effectiveState, sunPos, this.flatCamera);
             this.renderer.render(this.scene, this.flatCamera);
             return;
         }
@@ -971,7 +988,13 @@ export class SatelliteSimulation {
         // 4. Update Layers using the cached positions
         this.sunLight.position.copy(sunPos).multiplyScalar(100000);
 
-        this.earth.update(this.camera.position, state.visibleLayers, state.selectedMap, state.showDayNightLayer, sunPos);
+        this.earth.update(
+            this.camera.position,
+            effectiveState.visibleLayers,
+            effectiveState.selectedMap,
+            effectiveState.showDayNightLayer,
+            sunPos
+        );
         
         if (this.instancedMesh) {
             this.instancedMesh.updatePositions(state.satellites, this.satCartesianPositions);
